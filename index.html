@@ -1,0 +1,1211 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Pixel Office</title>
+    <style>
+      :root {
+        --po-font:
+          'Galmuri11', 'DungGeunMo', 'NeoDunggeunmo', 'Malgun Gothic', 'Apple SD Gothic Neo',
+          sans-serif;
+      }
+      html,
+      body {
+        margin: 0;
+        background: #1d2b53;
+        font-family: var(--po-font);
+      }
+      .po {
+        position: relative;
+        width: 100%;
+        background: #1d2b53;
+        border: 3px solid #0e1430;
+        box-sizing: border-box;
+        user-select: none;
+      }
+      .po-stage {
+        position: relative;
+        line-height: 0;
+      }
+      .po canvas.po-world {
+        display: block;
+        image-rendering: pixelated;
+        outline: none;
+      }
+      .po canvas.po-world:focus-visible {
+        box-shadow: inset 0 0 0 2px #ffd23f;
+      }
+      .po-input {
+        position: absolute;
+        display: none;
+        width: 180px;
+        transform: translateX(-50%);
+        padding: 4px 6px;
+        border: 2px solid #0e1430;
+        background: #fff;
+        font: 13px var(--po-font);
+        line-height: 1.2;
+        outline: none;
+      }
+      .po-bar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 4px 10px;
+        background: #0e1430;
+        color: #fff;
+        font-size: 12px;
+      }
+      .po-select {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .po-select button {
+        width: 24px;
+        height: 24px;
+        padding: 0;
+        border: 2px solid #fff;
+        background: #e43b44;
+        color: #fff;
+        font: bold 12px var(--po-font);
+        cursor: pointer;
+      }
+      .po-select button:hover {
+        background: #ff5d66;
+      }
+      .po-select canvas {
+        width: 32px;
+        height: 32px;
+        image-rendering: pixelated;
+      }
+      .po-name {
+        min-width: 110px;
+      }
+      .po-hint {
+        opacity: 0.7;
+      }
+      .po-dot {
+        display: inline-block;
+        width: 8px;
+        height: 8px;
+        margin: 0 4px 0 8px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="po" id="pixel-office">
+      <div class="po-stage">
+        <canvas
+          class="po-world"
+          tabindex="0"
+          aria-label="Pixel Office. 클릭 후 화살표로 이동, Enter로 말하기"
+        ></canvas>
+        <input class="po-input" type="text" maxlength="40" placeholder="메시지 입력 후 Enter" />
+      </div>
+      <div class="po-bar">
+        <div class="po-select">
+          <button type="button" class="po-prev" aria-label="이전 캐릭터">◀</button>
+          <canvas class="po-preview" width="16" height="16"></canvas>
+          <button type="button" class="po-next" aria-label="다음 캐릭터">▶</button>
+          <span class="po-name"></span>
+        </div>
+        <span class="po-hint">클릭 → ←→ 이동 · ↑ 점프 · Enter 말하기</span>
+        <span class="po-count"></span>
+      </div>
+    </div>
+
+    <script>
+      (function () {
+        'use strict';
+
+        // ───────── 스프라이트 정의 (16x16, 오른쪽 바라봄) ─────────
+        const BODIES = {
+          worker: {
+            rows: [
+              '................',
+              '......HHHHH.....',
+              '.....HHHHHHHHH..',
+              '.....KKSSSES....',
+              '....KSSSSSSSS...',
+              '.....SSSSSSS....',
+              '......SSSSS.....',
+              '.....TTCTCTT....',
+              '....TTTCCCCTTT..',
+              '...SSTCCACCCTSS.',
+              '...SS.CCCCCC.SS.',
+              '......CCCCCC....',
+              '......CCC.CCC...',
+              '.....CCC...CCC..',
+              '....BBBB...BBBB.',
+              '....BBBB...BBBB.',
+            ],
+            alt: {
+              from: 12,
+              rows: [
+                '......CCCCC.....',
+                '.......CCC......',
+                '......BBBBB.....',
+                '......BBBB......',
+              ],
+            },
+            palette: {
+              H: '#e43b44',
+              T: '#e43b44',
+              C: '#2f5bd8',
+              A: '#ffd23f',
+              S: '#f6c39b',
+              K: '#5a3a22',
+              E: '#1a1a1a',
+              B: '#6b3e1f',
+              W: '#ffffff',
+              Y: '#ffd23f',
+              R: '#ff5d8f',
+              D: '#333a44',
+              P: '#7b4bd6',
+            },
+          },
+          shroom: {
+            rows: [
+              '................',
+              '.....RRRRRR.....',
+              '...RRWWRRRRRR...',
+              '..RRWWWRRRWWRR..',
+              '.RRRWWRRRRWWWRR.',
+              '.RRRRRRRRRRRRRR.',
+              '.KKKKKKKKKKKKKK.',
+              '....SSSSSSSS....',
+              '....SSSESSES....',
+              '....SSSESSES....',
+              '....SSSSSSSS....',
+              '.....TTTTTT.....',
+              '....STTTTTTS....',
+              '.....TTTTTT.....',
+              '.....BB..BB.....',
+              '....BBB..BBB....',
+            ],
+            alt: { from: 14, rows: ['....BB....BB....', '...BBB....BBB...'] },
+            palette: {
+              R: '#e43b44',
+              W: '#ffffff',
+              K: '#3a2a1a',
+              S: '#f8e7c9',
+              E: '#1a1a1a',
+              T: '#3a7bd5',
+              B: '#6b3e1f',
+            },
+          },
+          turtle: {
+            rows: [
+              '................',
+              '..........GGG...',
+              '.........GGGGG..',
+              '.........GGKGG..',
+              '.........GGGGG..',
+              '...HHHHH..GGG...',
+              '..HHWHHWHHGG....',
+              '.HHWHHHWHHHG....',
+              '.HHHHWHHHHHG....',
+              '.HHWHHHWHHH.....',
+              '.YYYYYYYYYY.....',
+              '..YYYYYYYYY.....',
+              '...GG....GG.....',
+              '...GG....GG.....',
+              '..GGG...GGG.....',
+              '................',
+            ],
+            alt: { from: 12, rows: ['....GG..GG......', '....GG..GG......', '...GGG.GGG......'] },
+            palette: {
+              G: '#7bd36a',
+              K: '#1a1a1a',
+              H: '#2e9e44',
+              W: '#7fe08a',
+              Y: '#f5e6a8',
+            },
+          },
+          ghost: {
+            rows: [
+              '................',
+              '................',
+              '.....WWWWWW.....',
+              '...WWWWWWWWWW...',
+              '..WWWWWWWWWWWW..',
+              '..WWWWWWKWWKWW..',
+              '.WWWWWWWKWWKWWW.',
+              '.WWWWWWWWWWWWWW.',
+              '.WWWWWWWAWWAWWW.',
+              '.WWWWWWWWWWWWWW.',
+              '.WWWWWWWWWWWWWW.',
+              '.WWWWWWWWWWWWWW.',
+              '.WWWWWWWWWWWWWW.',
+              '.WW.WWW.WWW.WWW.',
+              '.W...W...W...W..',
+              '................',
+            ],
+            alt: { from: 13, rows: ['.WWW.WWW.WWW.WW.', '..W...W...W...W.'] },
+            palette: { W: '#f5f5f5', K: '#1a1a1a', A: '#ff9ec7' },
+          },
+          slime: {
+            rows: [
+              '................',
+              '................',
+              '................',
+              '................',
+              '........L.......',
+              '.......LLL......',
+              '......LLLLL.....',
+              '.....LLLLWLL....',
+              '....LLLLLLWLL...',
+              '...LLLLLLLLLLL..',
+              '..LLLLLKLLKLLLL.',
+              '..LLLLLKLLKLLLL.',
+              '.LLLLLLLLLLLLLLL',
+              '.LLLLLLAAALLLLLL',
+              '.LLLLLLLLLLLLLLL',
+              '..DDDDDDDDDDDDD.',
+            ],
+            alt: { from: 4, rows: ['................', '........L.......', '.......LLL......'] },
+            palette: { L: '#4aa8ff', D: '#2a6fc9', W: '#ffffff', K: '#1a1a1a', A: '#1a1a1a' },
+          },
+          cat: {
+            rows: [
+              '................',
+              '....O.....O.....',
+              '....OO...OO.....',
+              '....OOOOOOO.....',
+              '...OOOOOOOOO....',
+              '...OOKOOOKOO....',
+              '...OOOOPOOOO....',
+              '...WOOOOOOOW....',
+              '....OOOOOOO.....',
+              '.....WWWWW......',
+              '....OWWWWWO..O..',
+              '....OWWWWWO.O...',
+              '....OOOOOOOO....',
+              '....OO...OO.....',
+              '....OO...OO.....',
+              '...OOO..OOO.....',
+            ],
+            alt: { from: 13, rows: ['.....OO.OO......', '.....OO.OO......', '....OOO.OOO.....'] },
+            palette: { O: '#ff9a3c', W: '#ffffff', K: '#1a1a1a', P: '#ff8ac2' },
+          },
+          robot: {
+            rows: [
+              '.......A........',
+              '.......D........',
+              '....MMMMMMMM....',
+              '....MDDDDDDM....',
+              '....MDCDDCDM....',
+              '....MDDDDDDM....',
+              '....MMMMMMMM....',
+              '.....DDDDDD.....',
+              '...MMMMMMMMMM...',
+              '..DMMRMMGMMMMD..',
+              '..DMMMMMMMMMMD..',
+              '...MMMMMMMMMM...',
+              '....DD....DD....',
+              '....DD....DD....',
+              '...MMM....MMM...',
+              '................',
+            ],
+            alt: { from: 12, rows: ['.....DD..DD.....', '.....DD..DD.....', '....MMM..MMM....'] },
+            palette: {
+              M: '#c0c7d1',
+              D: '#5a6270',
+              C: '#3ff0ff',
+              A: '#ff4040',
+              R: '#ff4040',
+              G: '#3fdc5a',
+            },
+          },
+          penguin: {
+            rows: [
+              '................',
+              '......KKKK......',
+              '.....KKKKKK.....',
+              '....KKKKKKKK....',
+              '....KKKKWEKK....',
+              '....KKKKKKKOO...',
+              '....KKWWWWKK....',
+              '...KKWWWWWWKK...',
+              '..KKKWWWWWWKKK..',
+              '..KK.WWWWWW.KK..',
+              '....KWWWWWWK....',
+              '....KWWWWWWK....',
+              '.....KWWWWK.....',
+              '......KKKK......',
+              '.....OO..OO.....',
+              '....OOO..OOO....',
+            ],
+            alt: { from: 14, rows: ['......OOOO......', '.....OO..OO.....'] },
+            palette: { K: '#23272e', W: '#ffffff', E: '#1a1a1a', O: '#ff9a3c' },
+          },
+          frog: {
+            rows: [
+              '................',
+              '................',
+              '....WW....WW....',
+              '...WEWG..WEWG...',
+              '...GGGGGGGGGG...',
+              '..GGGGGGGGGGGG..',
+              '..GGRRRRRRRRGG..',
+              '..GGGGGGGGGGGG..',
+              '...GGGGGGGGGG...',
+              '..GGYYYYYYYYGG..',
+              '.GG.YYYYYYYY.GG.',
+              '....YYYYYYYY....',
+              '....GGGGGGGG....',
+              '...GGG....GGG...',
+              '..GGGG....GGGG..',
+              '................',
+            ],
+            alt: { from: 13, rows: ['....GGG..GGG....', '...GGGG..GGGG...'] },
+            palette: { G: '#4cbb4c', W: '#ffffff', E: '#1a1a1a', R: '#c0392b', Y: '#f5e6a8' },
+          },
+          bear: {
+            rows: [
+              '................',
+              '...NN......NN...',
+              '...NNNNNNNNNN...',
+              '...NNNNNNNNNN...',
+              '..NNNKNNNNKNNN..',
+              '..NNNNNLLLNNNN..',
+              '..NNNNLLKLLNNN..',
+              '...NNNNLLNNNN...',
+              '....NNNNNNNN....',
+              '...NNTTTTTTNN...',
+              '..NNNTTTTTTNNN..',
+              '..NN.TTTTTT.NN..',
+              '....NNNNNNNN....',
+              '....NNN..NNN....',
+              '....NNN..NNN....',
+              '................',
+            ],
+            alt: { from: 13, rows: ['.....NN..NN.....', '.....NN..NN.....'] },
+            palette: { N: '#8b5a2b', K: '#1a1a1a', L: '#f3d9b1', T: '#3a7bd5' },
+          },
+        };
+
+        // worker 몸체의 0~2행(모자 영역)을 교체하는 액세서리
+        const HATS = {
+          crown: ['......Y.Y.Y.....', '......YYYYY.....', '.....KKKKKKK....'],
+          chef: ['.....WWWWWW.....', '.....WWWWWW.....', '.....KWWWWWK....'],
+          helmet: ['................', '......YYYYY.....', '....YYYYYYYYY...'],
+          headset: ['......KKKKK.....', '.....KKKKKKK....', '.....DKKKKKKD...'],
+          ribbon: ['...RR.KKKKK.....', '...RRKKKKKKK....', '....RKKKKKKKK...'],
+          wizard: ['........P.......', '.......PPP......', '....PPPPPPPPP...'],
+        };
+
+        const CHARACTERS = [
+          ['worker-red', '빨간모자 반장', 'worker', { H: '#e43b44', T: '#e43b44' }],
+          ['worker-green', '초록모자 기사', 'worker', { H: '#3fb950', T: '#3fb950' }],
+          ['worker-blue', '파란모자 막내', 'worker', { H: '#3a7bd5', T: '#3a7bd5', C: '#e0a030' }],
+          [
+            'worker-purple',
+            '보라모자 디자이너',
+            'worker',
+            { H: '#8e44ad', T: '#8e44ad', C: '#2c2c54' },
+          ],
+          [
+            'worker-orange',
+            '주황모자 배달원',
+            'worker',
+            { H: '#ff8c1a', T: '#ff8c1a', C: '#4a4a4a' },
+          ],
+          ['worker-crown', '왕관 대표님', 'worker', { T: '#e43b44', C: '#7b4bd6' }, 'crown'],
+          ['worker-chef', '셰프 사원', 'worker', { T: '#ffffff', C: '#8a8a8a' }, 'chef'],
+          ['worker-helmet', '안전모 현장소장', 'worker', { T: '#ff8c1a' }, 'helmet'],
+          ['worker-headset', '헤드셋 상담원', 'worker', { T: '#3fb950', C: '#333a44' }, 'headset'],
+          [
+            'worker-ribbon',
+            '리본 인턴',
+            'worker',
+            { K: '#2a1a10', T: '#ff5d8f', C: '#ff9ec7' },
+            'ribbon',
+          ],
+          ['worker-wizard', '마법사 개발자', 'worker', { T: '#7b4bd6', C: '#2c2c54' }, 'wizard'],
+          ['shroom-red', '빨간 버섯돌이', 'shroom', {}],
+          ['shroom-blue', '파란 버섯돌이', 'shroom', { R: '#3a7bd5', T: '#e43b44' }],
+          ['shroom-green', '초록 버섯돌이', 'shroom', { R: '#3fb950', T: '#8e44ad' }],
+          ['shroom-purple', '보라 버섯돌이', 'shroom', { R: '#8e44ad', T: '#3fb950' }],
+          ['turtle-green', '초록 거북이', 'turtle', {}],
+          ['turtle-red', '빨간 거북이', 'turtle', { H: '#d63c3c', W: '#ff8a80' }],
+          ['turtle-blue', '파란 거북이', 'turtle', { H: '#2c6bd6', W: '#7fb2ff' }],
+          ['turtle-purple', '보라 거북이', 'turtle', { H: '#7b4bd6', W: '#c3a0ff' }],
+          ['ghost-white', '야근 유령', 'ghost', {}],
+          ['ghost-pink', '분홍 유령', 'ghost', { W: '#ffc3dc', A: '#ff6fa8' }],
+          ['ghost-mint', '민트 유령', 'ghost', { W: '#bff5e0' }],
+          ['slime-blue', '파랑 슬라임', 'slime', {}],
+          ['slime-green', '초록 슬라임', 'slime', { L: '#5ed36a', D: '#2f9a3c' }],
+          ['slime-pink', '분홍 슬라임', 'slime', { L: '#ff8ac2', D: '#d4558f' }],
+          ['slime-gold', '황금 슬라임', 'slime', { L: '#ffd23f', D: '#c99a10' }],
+          ['cat-orange', '치즈 고양이', 'cat', {}],
+          ['cat-gray', '회색 고양이', 'cat', { O: '#9aa3ad' }],
+          ['cat-black', '까만 고양이', 'cat', { O: '#2b2b2b', K: '#ffd23f' }],
+          ['robot-silver', '은색 로봇', 'robot', {}],
+          ['robot-gold', '황금 로봇', 'robot', { M: '#e8c14a', D: '#7a5a10' }],
+          ['robot-pink', '분홍 로봇', 'robot', { M: '#ff9ec7', D: '#8a3a5a' }],
+          ['penguin-black', '펭귄 팀장', 'penguin', {}],
+          ['penguin-blue', '파란 펭귄', 'penguin', { K: '#2c5bb8' }],
+          ['frog-green', '초록 개구리', 'frog', {}],
+          ['frog-pink', '분홍 개구리', 'frog', { G: '#ff8ac2' }],
+          ['bear-brown', '갈색 곰', 'bear', {}],
+          ['bear-polar', '북극곰', 'bear', { N: '#f0f0f0', T: '#e43b44' }],
+        ].map(([id, name, body, pal, hat]) => ({ id, name, body, pal, hat }));
+        const CHAR_INDEX = new Map(CHARACTERS.map((c, i) => [c.id, i]));
+
+        function paint(rows, palette) {
+          const c = document.createElement('canvas');
+          c.width = c.height = 16;
+          const g = c.getContext('2d');
+          rows.forEach((row, y) => {
+            for (let x = 0; x < 16; x++) {
+              const col = palette[row[x]];
+              if (!col) continue;
+              g.fillStyle = col;
+              g.fillRect(x, y, 1, 1);
+            }
+          });
+          return c;
+        }
+
+        function mirror(src) {
+          const c = document.createElement('canvas');
+          c.width = c.height = 16;
+          const g = c.getContext('2d');
+          g.translate(16, 0);
+          g.scale(-1, 1);
+          g.drawImage(src, 0, 0);
+          return c;
+        }
+
+        // spriteCache[id] = [[frame0Right, frame0Left], [frame1Right, frame1Left]]
+        const spriteCache = new Map();
+        function sprite(charId, frame, facing) {
+          let s = spriteCache.get(charId);
+          if (!s) {
+            const def = CHARACTERS[CHAR_INDEX.get(charId) ?? 0];
+            const body = BODIES[def.body];
+            const palette = { ...body.palette, ...def.pal };
+            const base = body.rows.slice();
+            if (def.hat) HATS[def.hat].forEach((r, i) => (base[i] = r));
+            const alt = base.slice();
+            body.alt.rows.forEach((r, i) => (alt[body.alt.from + i] = r));
+            s = [base, alt].map((rows) => {
+              const right = paint(rows, palette);
+              return [right, mirror(right)];
+            });
+            spriteCache.set(charId, s);
+          }
+          return s[frame][facing === -1 ? 1 : 0];
+        }
+
+        // ───────── 입력 검증 ─────────
+        const MAX_CHAT = 40;
+        const ID_RE = /^[A-Za-z0-9_.-]{1,32}$/;
+        // eslint-disable-next-line no-control-regex
+        const CONTROL_RE = /[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2066-\u2069]/g;
+
+        function cleanText(t, max) {
+          if (typeof t !== 'string') return null;
+          const s = [...t.replace(CONTROL_RE, '').trim()].slice(0, max).join('');
+          return s || null;
+        }
+        const validId = (id) => typeof id === 'string' && ID_RE.test(id);
+        const validStatus = (s) => s === 'online' || s === 'offline';
+        const validChar = (c) => typeof c === 'string' && CHAR_INDEX.has(c);
+
+        function defaultChar(id) {
+          let h = 0;
+          for (const ch of id) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+          return CHARACTERS[h % CHARACTERS.length].id;
+        }
+
+        // ───────── 설정 ─────────
+        const params = new URLSearchParams(location.search);
+        const ME = validId(params.get('me')) ? params.get('me') : 'me';
+        const WS_URL = params.get('ws');
+        const PARENT_ORIGIN = params.get('parentOrigin') || location.origin;
+        const DEMO = !WS_URL && params.get('demo') !== '0';
+        const STORE_KEY = 'pixelOffice.characterId';
+
+        const root = document.getElementById('pixel-office');
+        const canvas = root.querySelector('.po-world');
+        const ctx = canvas.getContext('2d');
+        const input = root.querySelector('.po-input');
+        const preview = root.querySelector('.po-preview');
+        const nameEl = root.querySelector('.po-name');
+        const countEl = root.querySelector('.po-count');
+
+        const H = 112;
+        const GROUND = 96;
+        let W = 384;
+        let scale = 1;
+        let px = 1;
+
+        function resize() {
+          const cw = root.clientWidth - 6 || 384;
+          if (cw >= 384) {
+            scale = Math.min(3, Math.floor(cw / 384));
+            W = Math.floor(cw / scale);
+          } else {
+            scale = cw / 384;
+            W = 384;
+          }
+          const dpr = window.devicePixelRatio || 1;
+          px = scale * dpr;
+          canvas.style.width = W * scale + 'px';
+          canvas.style.height = H * scale + 'px';
+          canvas.width = Math.round(W * px);
+          canvas.height = Math.round(H * px);
+          for (const e of entities.values()) e.x = Math.max(4, Math.min(W - 4, e.x));
+        }
+
+        const zones = {
+          home: () => [16, 104],
+          office: () => [W - 108, W - 16],
+        };
+        const zoneFor = (status) => (status === 'online' ? zones.office() : zones.home());
+        function zoneOf(x) {
+          const [h0, h1] = zones.home();
+          const [o0, o1] = zones.office();
+          if (x >= h0 - 8 && x <= h1 + 8) return 'home';
+          if (x >= o0 - 8 && x <= o1 + 8) return 'office';
+          return 'road';
+        }
+        const rand = (a, b) => a + Math.random() * (b - a);
+
+        // ───────── 엔티티 ─────────
+        const entities = new Map();
+
+        function storedChar() {
+          try {
+            const v = localStorage.getItem(STORE_KEY);
+            return validChar(v) ? v : null;
+          } catch {
+            return null;
+          }
+        }
+
+        function upsert(u) {
+          if (!u || !validId(u.id)) return null;
+          let e = entities.get(u.id);
+          if (!e) {
+            const status = validStatus(u.status) ? u.status : 'offline';
+            const [a, b] = zoneFor(status);
+            e = {
+              id: u.id,
+              name: u.id,
+              status,
+              characterId: defaultChar(u.id),
+              x: rand(a, b),
+              y: 0,
+              vy: 0,
+              facing: 1,
+              target: null,
+              remoteX: null,
+              autopilot: false,
+              walking: false,
+              wanderAt: performance.now() + rand(500, 4000),
+              bubble: null,
+              isMe: u.id === ME,
+            };
+            entities.set(u.id, e);
+          }
+          const name = cleanText(u.name, 20);
+          if (name) e.name = name;
+          if (validStatus(u.status) && u.status !== e.status) setStatus(e, u.status);
+          if (validChar(u.characterId) && !(e.isMe && storedChar())) e.characterId = u.characterId;
+          if (!e.isMe && typeof u.x === 'number' && Number.isFinite(u.x)) {
+            e.remoteX = Math.max(0, Math.min(1, u.x)) * W;
+          }
+          return e;
+        }
+
+        function setStatus(e, status) {
+          e.status = status;
+          e.remoteX = null;
+          const [a, b] = zoneFor(status);
+          e.target = rand(a, b);
+          if (e.isMe) e.autopilot = true;
+        }
+
+        function say(e, text) {
+          e.bubble = { text, until: performance.now() + 5000 };
+        }
+
+        // ───────── 네트워크 ─────────
+        let ws = null;
+        let connected = false;
+        let backoff = 1000;
+        let lastSentX = null;
+        let lastSentAt = 0;
+
+        function send(msg) {
+          if (ws && ws.readyState === 1) ws.send(JSON.stringify(msg));
+        }
+
+        function connect() {
+          if (!WS_URL) return;
+          try {
+            ws = new WebSocket(WS_URL);
+          } catch {
+            return;
+          }
+          ws.onopen = () => {
+            connected = true;
+            backoff = 1000;
+            send({ type: 'hello', id: ME });
+            const c = storedChar();
+            if (c) send({ type: 'char', characterId: c });
+            lastSentX = null;
+          };
+          ws.onmessage = (ev) => {
+            let m;
+            try {
+              m = JSON.parse(ev.data);
+            } catch {
+              return;
+            }
+            handleServer(m);
+          };
+          ws.onclose = () => {
+            connected = false;
+            setTimeout(connect, backoff);
+            backoff = Math.min(backoff * 2, 30000);
+          };
+        }
+
+        function handleServer(m) {
+          if (!m || typeof m !== 'object') return;
+          const e = validId(m.id) ? entities.get(m.id) : null;
+          switch (m.type) {
+            case 'snapshot':
+              if (Array.isArray(m.users)) m.users.slice(0, 500).forEach(upsert);
+              break;
+            case 'move':
+              if (e && !e.isMe && typeof m.x === 'number' && Number.isFinite(m.x)) {
+                e.remoteX = Math.max(0, Math.min(1, m.x)) * W;
+                e.facing = m.facing === -1 ? -1 : 1;
+              }
+              break;
+            case 'chat': {
+              const text = cleanText(m.text, MAX_CHAT);
+              if (e && text) say(e, text);
+              break;
+            }
+            case 'char':
+              if (e && validChar(m.characterId) && !e.isMe) e.characterId = m.characterId;
+              break;
+            case 'status':
+              if (e && validStatus(m.status) && m.status !== e.status) setStatus(e, m.status);
+              break;
+          }
+        }
+
+        window.addEventListener('message', (ev) => {
+          if (ev.origin !== PARENT_ORIGIN) return;
+          const m = ev.data;
+          if (!m || typeof m !== 'object') return;
+          if (m.type === 'pixel-office:roster' && Array.isArray(m.users)) {
+            const ids = new Set();
+            m.users.slice(0, 500).forEach((u) => {
+              const e = upsert(u);
+              if (e) ids.add(e.id);
+            });
+            for (const id of entities.keys()) if (!ids.has(id) && id !== ME) entities.delete(id);
+          } else if (m.type === 'pixel-office:status') {
+            const e = validId(m.id) ? entities.get(m.id) : null;
+            if (e && validStatus(m.status) && m.status !== e.status) setStatus(e, m.status);
+          }
+        });
+
+        // ───────── 입력 ─────────
+        const keys = new Set();
+        let chatting = false;
+
+        canvas.addEventListener('keydown', (ev) => {
+          if (chatting) return;
+          if (['ArrowLeft', 'ArrowRight', 'ArrowUp', ' '].includes(ev.key)) {
+            ev.preventDefault();
+            keys.add(ev.key);
+          } else if (ev.key === 'Enter') {
+            ev.preventDefault();
+            openChat();
+          }
+        });
+        canvas.addEventListener('keyup', (ev) => keys.delete(ev.key));
+        canvas.addEventListener('blur', () => keys.clear());
+        canvas.addEventListener('mousedown', () => canvas.focus());
+
+        function openChat() {
+          const me = entities.get(ME);
+          if (!me) return;
+          chatting = true;
+          keys.clear();
+          input.value = '';
+          input.style.display = 'block';
+          input.style.left = Math.max(90, Math.min(W * scale - 90, me.x * scale)) + 'px';
+          input.style.top = Math.max(0, (GROUND - 46) * scale) + 'px';
+          input.focus();
+        }
+
+        function closeChat() {
+          chatting = false;
+          input.style.display = 'none';
+          canvas.focus();
+        }
+
+        input.addEventListener('keydown', (ev) => {
+          ev.stopPropagation();
+          if (ev.isComposing) return;
+          if (ev.key === 'Enter') {
+            ev.preventDefault();
+            const text = cleanText(input.value, MAX_CHAT);
+            const me = entities.get(ME);
+            if (text && me) {
+              say(me, text);
+              send({ type: 'chat', text });
+            }
+            closeChat();
+          } else if (ev.key === 'Escape') {
+            closeChat();
+          }
+        });
+        input.addEventListener('blur', () => {
+          if (chatting) {
+            chatting = false;
+            input.style.display = 'none';
+          }
+        });
+
+        // ───────── 캐릭터 선택 ─────────
+        function myChar() {
+          return entities.get(ME)?.characterId ?? CHARACTERS[0].id;
+        }
+
+        function pick(delta) {
+          const me = entities.get(ME);
+          if (!me) return;
+          const i =
+            (CHAR_INDEX.get(me.characterId) + delta + CHARACTERS.length) % CHARACTERS.length;
+          me.characterId = CHARACTERS[i].id;
+          try {
+            localStorage.setItem(STORE_KEY, me.characterId);
+          } catch {
+            /* localStorage 차단 환경 */
+          }
+          send({ type: 'char', characterId: me.characterId });
+          renderBar();
+        }
+        root.querySelector('.po-prev').addEventListener('click', () => pick(-1));
+        root.querySelector('.po-next').addEventListener('click', () => pick(1));
+
+        let lastBar = '';
+        function renderBar() {
+          const cid = myChar();
+          let on = 0;
+          for (const e of entities.values()) if (e.status === 'online') on++;
+          const key = cid + '|' + on + '|' + entities.size;
+          if (key === lastBar) return;
+          lastBar = key;
+          const pg = preview.getContext('2d');
+          pg.clearRect(0, 0, 16, 16);
+          pg.drawImage(sprite(cid, 0, 1), 0, 0);
+          const i = CHAR_INDEX.get(cid);
+          nameEl.textContent = `${i + 1}/${CHARACTERS.length} ${CHARACTERS[i].name}`;
+          countEl.replaceChildren(
+            dot('#3fdc5a'),
+            `Online ${on}`,
+            dot('#8a8f98'),
+            `Offline ${entities.size - on}`,
+          );
+        }
+        function dot(color) {
+          const s = document.createElement('span');
+          s.className = 'po-dot';
+          s.style.background = color;
+          return s;
+        }
+
+        // ───────── 업데이트 ─────────
+        const SPEED_ME = 70;
+        const SPEED_COMMUTE = 55;
+        const SPEED_WANDER = 18;
+        const GRAVITY = 420;
+
+        function step(e, dt, now) {
+          let goal = null;
+          let speed = SPEED_WANDER;
+
+          if (e.isMe) {
+            const dir = (keys.has('ArrowRight') ? 1 : 0) - (keys.has('ArrowLeft') ? 1 : 0);
+            if ((keys.has('ArrowUp') || keys.has(' ')) && e.y === 0) e.vy = -150;
+            if (dir) {
+              e.autopilot = false;
+              e.target = null;
+              e.facing = dir;
+              e.x = Math.max(4, Math.min(W - 4, e.x + dir * SPEED_ME * dt));
+              e.walking = true;
+            } else if (e.autopilot && e.target != null) {
+              goal = e.target;
+              speed = SPEED_COMMUTE;
+            } else {
+              e.walking = false;
+            }
+            if (e.vy || e.y) {
+              e.vy += GRAVITY * dt;
+              e.y = Math.min(0, e.y + e.vy * dt);
+              if (e.y === 0) e.vy = 0;
+            }
+          } else if (e.remoteX != null) {
+            goal = e.remoteX;
+            speed = Math.max(SPEED_ME, Math.abs(e.remoteX - e.x) * 4);
+          } else {
+            if (e.target == null && now > e.wanderAt) {
+              const [a, b] = zoneFor(e.status);
+              e.target = Math.random() < 0.6 ? rand(a, b) : null;
+              e.wanderAt = now + rand(2500, 7000);
+            }
+            if (e.target != null) {
+              goal = e.target;
+              speed =
+                zoneOf(e.x) === (e.status === 'online' ? 'office' : 'home')
+                  ? SPEED_WANDER
+                  : SPEED_COMMUTE;
+            }
+          }
+
+          if (goal != null) {
+            const d = goal - e.x;
+            if (Math.abs(d) < 0.5) {
+              e.x = goal;
+              e.walking = false;
+              if (e.remoteX == null) e.target = null;
+              if (e.isMe) e.autopilot = false;
+            } else {
+              e.facing = d > 0 ? 1 : -1;
+              e.x += Math.sign(d) * Math.min(Math.abs(d), speed * dt);
+              e.walking = true;
+            }
+          }
+
+          if (e.bubble && now > e.bubble.until) e.bubble = null;
+        }
+
+        function syncMe(now) {
+          const me = entities.get(ME);
+          if (!me || !connected) return;
+          const nx = Math.round((me.x / W) * 10000) / 10000;
+          if (nx !== lastSentX && now - lastSentAt >= 100) {
+            send({ type: 'move', x: nx, facing: me.facing });
+            lastSentX = nx;
+            lastSentAt = now;
+          }
+        }
+
+        // ───────── 그리기 ─────────
+        function skyColors() {
+          const h = new Date().getHours();
+          if (h >= 7 && h < 17) return { sky: '#6cb4ff', night: false };
+          if (h >= 17 && h < 19) return { sky: '#f39c6b', night: false };
+          if (h >= 5 && h < 7) return { sky: '#9fb7e8', night: false };
+          return { sky: '#1d2b53', night: true };
+        }
+
+        const clouds = Array.from({ length: 6 }, (_, i) => ({
+          x: i * 90 + rand(0, 40),
+          y: rand(6, 30),
+          s: rand(3, 7),
+        }));
+        const stars = Array.from({ length: 40 }, () => [Math.random(), rand(2, 60)]);
+
+        function rect(x, y, w, h, c) {
+          ctx.fillStyle = c;
+          ctx.fillRect(x, y, w, h);
+        }
+
+        function drawCloud(x, y) {
+          rect(x + 4, y, 12, 4, '#fff');
+          rect(x, y + 4, 24, 4, '#fff');
+          rect(x + 2, y + 8, 20, 2, '#dfefff');
+        }
+
+        function drawHills() {
+          ctx.fillStyle = '#4fa75a';
+          for (let x = -20; x < W; x += 140) {
+            ctx.beginPath();
+            ctx.moveTo(x, GROUND);
+            ctx.lineTo(x + 40, GROUND - 26);
+            ctx.lineTo(x + 52, GROUND - 26);
+            ctx.lineTo(x + 92, GROUND);
+            ctx.fill();
+          }
+        }
+
+        function drawHouse(night) {
+          const x = 22;
+          rect(x, GROUND - 34, 64, 34, '#e8d3a8');
+          for (let y = GROUND - 34; y < GROUND; y += 4) rect(x, y, 64, 1, '#d4bc8c');
+          ctx.fillStyle = '#c0392b';
+          ctx.beginPath();
+          ctx.moveTo(x - 6, GROUND - 34);
+          ctx.lineTo(x + 32, GROUND - 58);
+          ctx.lineTo(x + 70, GROUND - 34);
+          ctx.fill();
+          rect(x + 48, GROUND - 56, 8, 14, '#7a4b2a');
+          rect(x + 26, GROUND - 20, 12, 20, '#7a4b2a');
+          rect(x + 35, GROUND - 11, 2, 2, '#ffd23f');
+          const win = night ? '#ffe08a' : '#9fd8ff';
+          rect(x + 6, GROUND - 26, 12, 10, '#5a3a22');
+          rect(x + 7, GROUND - 25, 10, 8, win);
+          rect(x + 46, GROUND - 26, 12, 10, '#5a3a22');
+          rect(x + 47, GROUND - 25, 10, 8, win);
+          label('HOME', x + 32, GROUND - 62);
+        }
+
+        function drawOffice(night) {
+          const x = W - 100;
+          rect(x, GROUND - 76, 84, 76, '#5b6b8c');
+          rect(x, GROUND - 76, 84, 3, '#3d4a66');
+          for (let r = 0; r < 6; r++) {
+            for (let c = 0; c < 6; c++) {
+              const lit = night ? (r * 7 + c * 3) % 4 !== 0 : false;
+              rect(x + 6 + c * 13, GROUND - 68 + r * 10, 8, 6, lit ? '#ffe08a' : '#9fd8ff');
+            }
+          }
+          rect(x + 32, GROUND - 12, 20, 12, '#2c3550');
+          rect(x + 41, GROUND - 12, 2, 12, '#9fd8ff');
+          label('OFFICE', x + 42, GROUND - 80);
+        }
+
+        function drawTree(x) {
+          rect(x + 6, GROUND - 12, 4, 12, '#7a4b2a');
+          rect(x, GROUND - 26, 16, 14, '#2e9e44');
+          rect(x + 3, GROUND - 30, 10, 4, '#2e9e44');
+          rect(x + 2, GROUND - 24, 4, 3, '#4cbb4c');
+        }
+
+        function drawGround() {
+          rect(0, GROUND, W, H - GROUND, '#c8743a');
+          rect(0, GROUND, W, 3, '#5ed36a');
+          rect(0, GROUND + 3, W, 1, '#2e9e44');
+          ctx.fillStyle = '#a85a28';
+          for (let x = 0; x < W; x += 8) {
+            ctx.fillRect(x, GROUND + 4, 1, H - GROUND);
+          }
+          for (let y = GROUND + 8; y < H; y += 6) ctx.fillRect(0, y, W, 1);
+          // 출퇴근 길
+          const r0 = zones.home()[1] + 12;
+          const r1 = zones.office()[0] - 12;
+          for (let x = r0; x < r1; x += 10) rect(x, GROUND + 1, 5, 1, '#fff5c0');
+        }
+
+        function setFont(size, weight = '') {
+          ctx.font = `${weight} ${size}px ${getComputedStyle(root).getPropertyValue('--po-font')}`;
+        }
+
+        function label(text, cx, y) {
+          setFont(6, 'bold');
+          const w = ctx.measureText(text).width + 6;
+          rect(Math.round(cx - w / 2), y - 6, Math.round(w), 8, '#0e1430');
+          ctx.fillStyle = '#ffd23f';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(text, cx, y - 2);
+        }
+
+        function wrap(text, maxW) {
+          const lines = [];
+          let line = '';
+          // 공백 단위로 줄바꿈하고, 한 단어가 너무 길면 글자 단위로 자른다
+          for (const word of text.split(/(?<= )/)) {
+            if (ctx.measureText(line + word).width <= maxW) {
+              line += word;
+              continue;
+            }
+            if (line) lines.push(line.trimEnd());
+            line = '';
+            for (const ch of word) {
+              if (ctx.measureText(line + ch).width > maxW && line) {
+                lines.push(line);
+                line = ch;
+              } else line += ch;
+            }
+          }
+          if (line) lines.push(line);
+          return lines.slice(0, 3);
+        }
+
+        function drawBubble(e) {
+          setFont(6);
+          const lines = wrap(e.bubble.text, 80);
+          const tw = Math.max(...lines.map((l) => ctx.measureText(l).width));
+          const bw = Math.ceil(tw) + 8;
+          const bh = lines.length * 7 + 5;
+          const bx = Math.round(Math.max(1, Math.min(W - bw - 1, e.x - bw / 2)));
+          const by = Math.round(GROUND - 22 + e.y - bh);
+          rect(bx, by, bw, bh, '#0e1430');
+          rect(bx + 1, by + 1, bw - 2, bh - 2, '#ffffff');
+          const tx = Math.round(Math.max(bx + 3, Math.min(bx + bw - 6, e.x - 2)));
+          rect(tx, by + bh - 1, 4, 2, '#ffffff');
+          rect(tx + 1, by + bh + 1, 2, 2, '#0e1430');
+          rect(tx - 1, by + bh - 1, 1, 2, '#0e1430');
+          rect(tx + 4, by + bh - 1, 1, 2, '#0e1430');
+          ctx.fillStyle = '#0e1430';
+          ctx.textAlign = 'left';
+          ctx.textBaseline = 'top';
+          lines.forEach((l, i) => ctx.fillText(l, bx + 4, by + 3 + i * 7));
+        }
+
+        function drawEntity(e, now) {
+          const frame = e.walking && Math.floor(now / 160) % 2 ? 1 : 0;
+          const x = Math.round(e.x - 8);
+          const y = Math.round(GROUND - 16 + e.y);
+          rect(x + 3, GROUND - 1, 10, 1, 'rgba(0,0,0,0.25)');
+          ctx.drawImage(sprite(e.characterId, frame, e.facing), x, y);
+          if (e.isMe) {
+            ctx.fillStyle = '#ffd23f';
+            ctx.beginPath();
+            ctx.moveTo(e.x - 2, y - 4);
+            ctx.lineTo(e.x + 2, y - 4);
+            ctx.lineTo(e.x, y - 2);
+            ctx.fill();
+          }
+        }
+
+        // 붐빌 때 이름표가 겹치면 건너뛴다. 내 이름표 → 말풍선 있는 사람 → 나머지 순으로 우선.
+        function drawNameTags(list) {
+          setFont(5, 'bold');
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'top';
+          const order = [...list].sort((a, b) => b.isMe - a.isMe || !!b.bubble - !!a.bubble);
+          const taken = [];
+          for (const e of order) {
+            const nw = ctx.measureText(e.name).width;
+            const l = Math.round(e.x - nw / 2 - 5);
+            const r = l + Math.ceil(nw) + 9;
+            if (taken.some(([a, b]) => l < b + 1 && r > a - 1)) continue;
+            taken.push([l, r]);
+            rect(l, GROUND + 6, r - l, 7, 'rgba(14,20,48,0.75)');
+            rect(l + 2, GROUND + 8, 3, 3, e.status === 'online' ? '#3fdc5a' : '#8a8f98');
+            ctx.fillStyle = e.isMe ? '#ffd23f' : '#ffffff';
+            ctx.fillText(e.name, e.x + 2, GROUND + 7);
+          }
+        }
+
+        function draw(now) {
+          ctx.setTransform(px, 0, 0, px, 0, 0);
+          ctx.imageSmoothingEnabled = false;
+          const { sky, night } = skyColors();
+          rect(0, 0, W, H, sky);
+          if (night)
+            for (const [sx, sy] of stars) rect(Math.floor(sx * W), Math.floor(sy), 1, 1, '#fff');
+          for (const c of clouds) {
+            c.x += c.s * 0.016;
+            if (c.x > W + 10) c.x = -30;
+            if (!night) drawCloud(Math.round(c.x), Math.round(c.y));
+          }
+          drawHills();
+          drawHouse(night);
+          drawOffice(night);
+          const r0 = zones.home()[1] + 20;
+          const r1 = zones.office()[0] - 30;
+          for (let x = r0; x < r1; x += 70) drawTree(x);
+          drawGround();
+
+          const list = [...entities.values()].sort((a, b) => a.isMe - b.isMe || a.x - b.x);
+          list.forEach((e) => drawEntity(e, now));
+          drawNameTags(list);
+          list.forEach((e) => e.bubble && drawBubble(e));
+
+          if (document.activeElement !== canvas && !chatting) {
+            setFont(6, 'bold');
+            const msg = '▶ 클릭해서 조작하기';
+            const w = ctx.measureText(msg).width + 8;
+            rect(Math.round(W / 2 - w / 2), 3, Math.round(w), 9, 'rgba(14,20,48,0.8)');
+            ctx.fillStyle = '#fff';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(msg, W / 2, 8);
+          }
+        }
+
+        let last = performance.now();
+        function loop(now) {
+          const dt = Math.min(0.1, (now - last) / 1000);
+          last = now;
+          for (const e of entities.values()) step(e, dt, now);
+          syncMe(now);
+          draw(now);
+          renderBar();
+          requestAnimationFrame(loop);
+        }
+
+        // ───────── 데모 모드 ─────────
+        const DEMO_LINES = [
+          '커피 한잔?',
+          '점심 뭐 먹지',
+          '퇴근하고 싶다',
+          '회의 5분 전!',
+          '배포 완료 🎉',
+          '오늘도 화이팅',
+        ];
+        function startDemo() {
+          [
+            { id: 'kim', name: '김하늘', status: 'online', characterId: 'worker-red' },
+            { id: 'lee', name: '이바다', status: 'online', characterId: 'shroom-red' },
+            { id: 'park', name: '박구름', status: 'offline', characterId: 'turtle-green' },
+            { id: 'choi', name: '최별', status: 'online', characterId: 'cat-orange' },
+            { id: 'jung', name: '정숲', status: 'offline', characterId: 'robot-silver' },
+            { id: 'kang', name: '강산', status: 'online', characterId: 'penguin-blue' },
+          ].forEach(upsert);
+          setInterval(() => {
+            const others = [...entities.values()].filter((e) => !e.isMe);
+            const e = others[Math.floor(Math.random() * others.length)];
+            if (!e) return;
+            if (Math.random() < 0.4) setStatus(e, e.status === 'online' ? 'offline' : 'online');
+            else say(e, DEMO_LINES[Math.floor(Math.random() * DEMO_LINES.length)]);
+          }, 6000);
+        }
+
+        // ───────── 시작 ─────────
+        upsert({ id: ME, name: ME === 'me' ? '나' : ME, status: 'online' });
+        const saved = storedChar();
+        if (saved) entities.get(ME).characterId = saved;
+        resize();
+        new ResizeObserver(resize).observe(root);
+        if (DEMO) startDemo();
+        connect();
+        requestAnimationFrame(loop);
+
+        // 테스트/디버깅용 읽기 전용 스냅샷
+        window.__pixelOffice = {
+          getState() {
+            return JSON.parse(
+              JSON.stringify({
+                me: ME,
+                width: W,
+                connected,
+                focused: document.activeElement === canvas,
+                chatting,
+                characters: CHARACTERS.map((c) => c.id),
+                entities: [...entities.values()].map((e) => ({
+                  id: e.id,
+                  name: e.name,
+                  status: e.status,
+                  characterId: e.characterId,
+                  x: e.x,
+                  zone: zoneOf(e.x),
+                  bubble: e.bubble ? e.bubble.text : null,
+                })),
+              }),
+            );
+          },
+        };
+      })();
+    </script>
+  </body>
+</html>

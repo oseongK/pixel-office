@@ -1,0 +1,25 @@
+{
+  "name": "pixel-office",
+  "version": "0.1.0",
+  "private": true,
+  "description": "근태 대시보드 상단용 도트 게임 배너 (집 ↔ 회사)",
+  "type": "module",
+  "scripts": {
+    "dev": "node dev/mock-server.js",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "node --test tests/*.test.js && playwright test",
+    "test:unit": "node --test tests/*.test.js",
+    "test:e2e": "playwright test"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.64.1",
+    "eslint": "^10.14.0",
+    "eslint-plugin-html": "^8.2.1",
+    "globals": "^17.14.0",
+    "prettier": "^3.9.10",
+    "ws": "^8.22.1"
+  }
+}
