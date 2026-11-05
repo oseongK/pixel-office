@@ -16,12 +16,12 @@ Pixel Office(`index.html`)는 iframe으로 삽입되며, 두 채널로 데이터
 ></iframe>
 ```
 
-| 파라미터       | 필수 | 설명                                                                    |
-| -------------- | ---- | ----------------------------------------------------------------------- |
-| `me`           | O    | 현재 로그인 사용자 id. `[A-Za-z0-9_.-]{1,32}`                           |
-| `ws`           | O    | WebSocket URL. 없으면 데모 모드(가짜 직원, 로컬 전용)로 동작            |
-| `parentOrigin` | 권장 | postMessage 를 허용할 부모 origin. 생략 시 iframe 자신의 origin 만 허용 |
-| `demo=0`       | -    | ws 없이 데모 직원/이벤트 없이 실행 (postMessage 만 사용하는 경우)       |
+| 파라미터       | 필수 | 설명                                                                                                     |
+| -------------- | ---- | -------------------------------------------------------------------------------------------------------- |
+| `me`           | O    | 현재 로그인 사용자 id. `[A-Za-z0-9_.-]{1,32}`                                                            |
+| `ws`           | O    | WebSocket URL (`ws:`/`wss:` 만 허용). 없으면 데모 모드(가짜 직원, 로컬 전용)로 동작                      |
+| `parentOrigin` | 권장 | postMessage 를 허용할 부모 origin(`https://host[:port]`). 잘못된 값/생략 시 iframe 자신의 origin 만 허용 |
+| `demo=0`       | -    | ws 없이 데모 직원/이벤트 없이 실행 (postMessage 만 사용하는 경우)                                        |
 
 높이: 화면 폭 기준 캔버스 높이 = `112 × scale`(scale = 폭/384 내림, 최대 3) + 하단 바 약 36px.
 
@@ -63,13 +63,14 @@ Pixel Office(`index.html`)는 iframe으로 삽입되며, 두 채널로 데이터
 
 ### 서버 → 클라이언트
 
-| type       | 필드                                                     |
-| ---------- | -------------------------------------------------------- |
-| `snapshot` | `users`: `[{id,name,status,characterId,x\|null,facing}]` |
-| `move`     | `id`, `x`, `facing`                                      |
-| `chat`     | `id`, `text`, `ts`                                       |
-| `char`     | `id`, `characterId`                                      |
-| `status`   | `id`, `status` — 근태 변경 시 서버가 푸시 (선택)         |
+| type       | 필드                                                                             |
+| ---------- | -------------------------------------------------------------------------------- |
+| `snapshot` | `users`: `[{id,name,status,characterId,x\|null,facing}]`                         |
+| `move`     | `id`, `x`, `facing`                                                              |
+| `chat`     | `id`, `text`, `ts`                                                               |
+| `char`     | `id`, `characterId`                                                              |
+| `status`   | `id`, `status` — 근태 변경 시 서버가 푸시 (선택)                                 |
+| `leave`    | `id` — 해당 사용자 연결 종료 (클라이언트는 원격 위치 추적만 해제, 캐릭터는 유지) |
 
 접속 시 및 신규 사용자 합류 시 `snapshot` 브로드캐스트. 미지 type 은 클라이언트가 무시한다.
 

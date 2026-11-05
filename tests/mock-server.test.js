@@ -112,3 +112,37 @@ test('정적 서빙은 index.html 만', async () => {
   assert.equal((await fetch(`http://localhost:${port}/index.html`)).status, 200);
   assert.equal((await fetch(`http://localhost:${port}/package.json`)).status, 404);
 });
+
+test('1KB 초과 프레임에도 서버가 죽지 않음', async () => {
+  const a = await client();
+  const closed = new Promise((r) => a.ws.on('close', r));
+  a.ws.send('x'.repeat(5000));
+  await closed;
+  const b = await client();
+  b.ws.send(JSON.stringify({ type: 'hello', id: 'alive' }));
+  await b.next((m) => m.type === 'snapshot');
+  b.ws.close();
+});
+
+test('접속 종료 시 leave 브로드캐스트, 동적 사용자 제거', async () => {
+  const a = await client();
+  const b = await client();
+  a.ws.send(JSON.stringify({ type: 'hello', id: 'temp1' }));
+  b.ws.send(JSON.stringify({ type: 'hello', id: 'watcher' }));
+  await b.next((m) => m.type === 'snapshot' && m.users.some((u) => u.id === 'watcher'));
+  a.ws.close();
+  assert.deepEqual(await b.next((m) => m.type === 'leave'), { type: 'leave', id: 'temp1' });
+  assert.equal(server.users.has('temp1'), false);
+  assert.equal(server.users.has('kim'), true);
+  b.ws.close();
+});
+
+test('hello 는 연결당 1회만 처리', async () => {
+  const a = await client();
+  a.ws.send(JSON.stringify({ type: 'hello', id: 'once1' }));
+  a.ws.send(JSON.stringify({ type: 'hello', id: 'once2' }));
+  await a.next((m) => m.type === 'snapshot');
+  await new Promise((r) => setTimeout(r, 50));
+  assert.equal(server.users.has('once2'), false);
+  a.ws.close();
+});

@@ -119,3 +119,46 @@ test('캐릭터 선택 변경 후 새로고침해도 유지', async ({ page }) =
   await page.reload();
   expect((await entity(page, 'me')).characterId).toBe(picked);
 });
+
+test('로스터 postMessage 가 WebSocket 전용 사용자를 지우지 않음', async ({ page }) => {
+  await open(page, 'lee');
+  await page.evaluate(() =>
+    window.postMessage(
+      { type: 'pixel-office:roster', users: [{ id: 'lee', name: '이', status: 'online' }] },
+      '*',
+    ),
+  );
+  await page.waitForTimeout(100);
+  expect(await entity(page, 'kim')).toBeTruthy();
+});
+
+test('잘못된 parentOrigin/ws 파라미터는 무시', async ({ page }) => {
+  const errors = [];
+  page.on('pageerror', (e) => errors.push(e));
+  await page.goto('/index.html?demo=0&ws=javascript:alert(1)&parentOrigin=evil');
+  const s = await state(page);
+  expect(s.connected).toBe(false);
+  await page.evaluate(() =>
+    window.postMessage(
+      { type: 'pixel-office:roster', users: [{ id: 'z', status: 'online' }] },
+      '*',
+    ),
+  );
+  await expect.poll(async () => !!(await entity(page, 'z'))).toBe(true);
+  expect(errors).toEqual([]);
+});
+
+test('창 크기 변경 시 회사에 있던 직원이 회사 구역 유지', async ({ page }) => {
+  await page.setViewportSize({ width: 800, height: 400 });
+  await page.goto('/index.html?me=u1&demo=0');
+  await page.evaluate(() =>
+    window.postMessage(
+      { type: 'pixel-office:roster', users: [{ id: 'u3', name: 'u3', status: 'online' }] },
+      '*',
+    ),
+  );
+  await expect.poll(async () => (await entity(page, 'u3'))?.zone).toBe('office');
+  await page.setViewportSize({ width: 1300, height: 400 });
+  await expect.poll(async () => (await state(page)).width).toBeGreaterThan(420);
+  await expect.poll(async () => (await entity(page, 'u3')).zone, { timeout: 10000 }).toBe('office');
+});

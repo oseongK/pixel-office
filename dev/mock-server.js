@@ -7,6 +7,7 @@ import { WebSocketServer } from 'ws';
 
 export const MAX_CHAT_LEN = 40;
 export const CHAT_INTERVAL_MS = 500;
+export const MAX_USERS = 200;
 
 const ID_RE = /^[A-Za-z0-9_.-]{1,32}$/;
 const CHAR_RE = /^[a-z0-9-]{1,32}$/;
@@ -65,6 +66,7 @@ const SEED = [
 
 export function createMockServer() {
   const users = new Map(SEED.map((u) => [u.id, { ...u, x: null, facing: 1 }]));
+  const seedIds = new Set(SEED.map((u) => u.id));
   const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 
   const http = createServer(async (req, res) => {
@@ -105,12 +107,24 @@ export function createMockServer() {
   wss.on('connection', (ws) => {
     let me = null;
     let lastChat = 0;
+    // 크기 초과 프레임 등 프로토콜 오류 시 프로세스가 죽지 않도록
+    ws.on('error', () => ws.terminate());
+    ws.on('close', () => {
+      if (!me || [...wss.clients].some((c) => c !== ws && c.userId === me)) return;
+      const user = users.get(me);
+      if (user) user.x = null;
+      if (!seedIds.has(me)) users.delete(me);
+      broadcast({ type: 'leave', id: me });
+    });
     ws.on('message', (raw) => {
       const msg = parseClientMessage(raw);
       if (!msg) return;
       // mock 이므로 hello.id 를 신뢰한다. 실서버는 세션으로 식별해야 함.
       if (msg.type === 'hello') {
+        if (me) return;
+        if (!users.has(msg.id) && users.size >= MAX_USERS) return ws.close(1013, 'full');
         me = msg.id;
+        ws.userId = me;
         if (!users.has(me)) {
           users.set(me, {
             id: me,

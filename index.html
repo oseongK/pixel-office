@@ -523,11 +523,22 @@
           return CHARACTERS[h % CHARACTERS.length].id;
         }
 
+        function parseUrl(v, protocols) {
+          if (!v) return null;
+          try {
+            const u = new URL(v);
+            return protocols.includes(u.protocol) ? u : null;
+          } catch {
+            return null;
+          }
+        }
+
         // ───────── 설정 ─────────
         const params = new URLSearchParams(location.search);
         const ME = validId(params.get('me')) ? params.get('me') : 'me';
-        const WS_URL = params.get('ws');
-        const PARENT_ORIGIN = params.get('parentOrigin') || location.origin;
+        const WS_URL = parseUrl(params.get('ws'), ['ws:', 'wss:'])?.href ?? null;
+        const PARENT_ORIGIN =
+          parseUrl(params.get('parentOrigin'), ['http:', 'https:'])?.origin ?? location.origin;
         const DEMO = !WS_URL && params.get('demo') !== '0';
         const STORE_KEY = 'pixelOffice.characterId';
 
@@ -538,6 +549,7 @@
         const preview = root.querySelector('.po-preview');
         const nameEl = root.querySelector('.po-name');
         const countEl = root.querySelector('.po-count');
+        const FONT_FAMILY = getComputedStyle(root).getPropertyValue('--po-font');
 
         const H = 112;
         const GROUND = 96;
@@ -546,7 +558,8 @@
         let px = 1;
 
         function resize() {
-          const cw = root.clientWidth - 6 || 384;
+          const cw = root.clientWidth || 384;
+          const oldW = W;
           if (cw >= 384) {
             scale = Math.min(3, Math.floor(cw / 384));
             W = Math.floor(cw / scale);
@@ -560,7 +573,14 @@
           canvas.style.height = H * scale + 'px';
           canvas.width = Math.round(W * px);
           canvas.height = Math.round(H * px);
-          for (const e of entities.values()) e.x = Math.max(4, Math.min(W - 4, e.x));
+          if (W === oldW) return;
+          // 존 좌표가 바뀌므로 위치는 비율 유지, 진행 중 목표는 새 존 기준으로 다시 잡는다
+          for (const e of entities.values()) {
+            e.x = Math.max(4, Math.min(W - 4, (e.x / oldW) * W));
+            if (e.target == null) continue;
+            if (e.isMe && !e.autopilot) e.target = null;
+            else e.target = rand(...zoneFor(e.status));
+          }
         }
 
         const zones = {
@@ -605,7 +625,8 @@
               vy: 0,
               facing: 1,
               target: null,
-              remoteX: null,
+              remoteNX: null,
+              fromRoster: false,
               autopilot: false,
               walking: false,
               wanderAt: performance.now() + rand(500, 4000),
@@ -619,14 +640,14 @@
           if (validStatus(u.status) && u.status !== e.status) setStatus(e, u.status);
           if (validChar(u.characterId) && !(e.isMe && storedChar())) e.characterId = u.characterId;
           if (!e.isMe && typeof u.x === 'number' && Number.isFinite(u.x)) {
-            e.remoteX = Math.max(0, Math.min(1, u.x)) * W;
+            e.remoteNX = Math.max(0, Math.min(1, u.x));
           }
           return e;
         }
 
         function setStatus(e, status) {
           e.status = status;
-          e.remoteX = null;
+          e.remoteNX = null;
           const [a, b] = zoneFor(status);
           e.target = rand(a, b);
           if (e.isMe) e.autopilot = true;
@@ -641,6 +662,7 @@
         let connected = false;
         let backoff = 1000;
         let lastSentX = null;
+        let lastSentFacing = null;
         let lastSentAt = 0;
 
         function send(msg) {
@@ -661,6 +683,7 @@
             const c = storedChar();
             if (c) send({ type: 'char', characterId: c });
             lastSentX = null;
+            lastSentFacing = null;
           };
           ws.onmessage = (ev) => {
             let m;
@@ -687,17 +710,20 @@
               break;
             case 'move':
               if (e && !e.isMe && typeof m.x === 'number' && Number.isFinite(m.x)) {
-                e.remoteX = Math.max(0, Math.min(1, m.x)) * W;
+                e.remoteNX = Math.max(0, Math.min(1, m.x));
                 e.facing = m.facing === -1 ? -1 : 1;
               }
               break;
             case 'chat': {
               const text = cleanText(m.text, MAX_CHAT);
-              if (e && text) say(e, text);
+              if (e && text && !(e.isMe && e.bubble?.text === text)) say(e, text);
               break;
             }
             case 'char':
               if (e && validChar(m.characterId) && !e.isMe) e.characterId = m.characterId;
+              break;
+            case 'leave':
+              if (e && !e.isMe) e.remoteNX = null;
               break;
             case 'status':
               if (e && validStatus(m.status) && m.status !== e.status) setStatus(e, m.status);
@@ -707,15 +733,20 @@
 
         window.addEventListener('message', (ev) => {
           if (ev.origin !== PARENT_ORIGIN) return;
+          if (ev.source !== window.parent && ev.source !== window) return;
           const m = ev.data;
           if (!m || typeof m !== 'object') return;
           if (m.type === 'pixel-office:roster' && Array.isArray(m.users)) {
             const ids = new Set();
             m.users.slice(0, 500).forEach((u) => {
               const e = upsert(u);
-              if (e) ids.add(e.id);
+              if (!e) return;
+              e.fromRoster = true;
+              ids.add(e.id);
             });
-            for (const id of entities.keys()) if (!ids.has(id) && id !== ME) entities.delete(id);
+            for (const e of [...entities.values()]) {
+              if (e.fromRoster && !ids.has(e.id) && !e.isMe) entities.delete(e.id);
+            }
           } else if (m.type === 'pixel-office:status') {
             const e = validId(m.id) ? entities.get(m.id) : null;
             if (e && validStatus(m.status) && m.status !== e.status) setStatus(e, m.status);
@@ -724,7 +755,9 @@
 
         // ───────── 입력 ─────────
         const keys = new Set();
+        const CHAT_INTERVAL = 600;
         let chatting = false;
+        let lastChatAt = -Infinity;
 
         canvas.addEventListener('keydown', (ev) => {
           if (chatting) return;
@@ -765,7 +798,9 @@
             ev.preventDefault();
             const text = cleanText(input.value, MAX_CHAT);
             const me = entities.get(ME);
-            if (text && me) {
+            const now = performance.now();
+            if (text && me && now - lastChatAt >= CHAT_INTERVAL) {
+              lastChatAt = now;
               say(me, text);
               send({ type: 'chat', text });
             }
@@ -860,9 +895,9 @@
               e.y = Math.min(0, e.y + e.vy * dt);
               if (e.y === 0) e.vy = 0;
             }
-          } else if (e.remoteX != null) {
-            goal = e.remoteX;
-            speed = Math.max(SPEED_ME, Math.abs(e.remoteX - e.x) * 4);
+          } else if (e.remoteNX != null) {
+            goal = e.remoteNX * W;
+            speed = Math.max(SPEED_ME, Math.abs(goal - e.x) * 4);
           } else {
             if (e.target == null && now > e.wanderAt) {
               const [a, b] = zoneFor(e.status);
@@ -883,7 +918,7 @@
             if (Math.abs(d) < 0.5) {
               e.x = goal;
               e.walking = false;
-              if (e.remoteX == null) e.target = null;
+              if (e.remoteNX == null) e.target = null;
               if (e.isMe) e.autopilot = false;
             } else {
               e.facing = d > 0 ? 1 : -1;
@@ -899,9 +934,10 @@
           const me = entities.get(ME);
           if (!me || !connected) return;
           const nx = Math.round((me.x / W) * 10000) / 10000;
-          if (nx !== lastSentX && now - lastSentAt >= 100) {
+          if ((nx !== lastSentX || me.facing !== lastSentFacing) && now - lastSentAt >= 100) {
             send({ type: 'move', x: nx, facing: me.facing });
             lastSentX = nx;
+            lastSentFacing = me.facing;
             lastSentAt = now;
           }
         }
@@ -1004,7 +1040,7 @@
         }
 
         function setFont(size, weight = '') {
-          ctx.font = `${weight} ${size}px ${getComputedStyle(root).getPropertyValue('--po-font')}`;
+          ctx.font = `${weight} ${size}px ${FONT_FAMILY}`;
         }
 
         function label(text, cx, y) {
@@ -1036,12 +1072,12 @@
             }
           }
           if (line) lines.push(line);
-          return lines.slice(0, 3);
+          return lines.slice(0, 6);
         }
 
         function drawBubble(e) {
           setFont(6);
-          const lines = wrap(e.bubble.text, 80);
+          const lines = wrap(e.bubble.text, 96);
           const tw = Math.max(...lines.map((l) => ctx.measureText(l).width));
           const bw = Math.ceil(tw) + 8;
           const bh = lines.length * 7 + 5;
@@ -1096,7 +1132,7 @@
           }
         }
 
-        function draw(now) {
+        function draw(now, dt) {
           ctx.setTransform(px, 0, 0, px, 0, 0);
           ctx.imageSmoothingEnabled = false;
           const { sky, night } = skyColors();
@@ -1104,7 +1140,7 @@
           if (night)
             for (const [sx, sy] of stars) rect(Math.floor(sx * W), Math.floor(sy), 1, 1, '#fff');
           for (const c of clouds) {
-            c.x += c.s * 0.016;
+            c.x += c.s * dt;
             if (c.x > W + 10) c.x = -30;
             if (!night) drawCloud(Math.round(c.x), Math.round(c.y));
           }
@@ -1139,7 +1175,7 @@
           last = now;
           for (const e of entities.values()) step(e, dt, now);
           syncMe(now);
-          draw(now);
+          draw(now, dt);
           renderBar();
           requestAnimationFrame(loop);
         }
