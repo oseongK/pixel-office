@@ -253,4 +253,4 @@ npm run dev         # 수동 확인: http://localhost:8787/index.html?me=kim&ws=
 
 - 일부 편집 도구가 정규식 안의 `​` 같은 이스케이프를 실제 보이지 않는 문자로 바꿔 저장한다. ESLint `no-irregular-whitespace` 가 잡으니 lint 를 꼭 돌릴 것
 - 사람이 매우 많으면(수십 명) 한 존에 몰려 겹친다. 이름표는 겹치면 자동 생략되고, 내 이름표와 말풍선 있는 사람이 우선 표시된다
-- GitHub Pages 는 현재 `feature/pixel-office` 브랜치 루트를 배포한다
+- GitHub Pages 는 `main` 브랜치 루트를 배포한다 (https://oseongk.github.io/pixel-office/)
