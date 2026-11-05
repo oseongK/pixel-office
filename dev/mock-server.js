@@ -8,6 +8,7 @@ import { WebSocketServer } from 'ws';
 export const MAX_CHAT_LEN = 40;
 export const CHAT_INTERVAL_MS = 500;
 export const MAX_USERS = 200;
+export const PUNISH_INTERVAL_MS = 3000;
 
 const ID_RE = /^[A-Za-z0-9_.-]{1,32}$/;
 const CHAR_RE = /^[a-z0-9-]{1,32}$/;
@@ -46,6 +47,8 @@ export function parseClientMessage(raw) {
       const text = sanitizeText(msg.text);
       return text ? { type: 'chat', text } : null;
     }
+    case 'punish':
+      return { type: 'punish' };
     case 'char':
       return typeof msg.characterId === 'string' && CHAR_RE.test(msg.characterId)
         ? { type: 'char', characterId: msg.characterId }
@@ -107,6 +110,7 @@ export function createMockServer() {
   wss.on('connection', (ws) => {
     let me = null;
     let lastChat = 0;
+    let lastPunish = 0;
     // 크기 초과 프레임 등 프로토콜 오류 시 프로세스가 죽지 않도록
     ws.on('error', () => ws.terminate());
     ws.on('close', () => {
@@ -149,6 +153,11 @@ export function createMockServer() {
         if (now - lastChat < CHAT_INTERVAL_MS) return;
         lastChat = now;
         broadcast({ type: 'chat', id: me, text: msg.text, ts: now });
+      } else if (msg.type === 'punish') {
+        const now = Date.now();
+        if (user.status !== 'online' || now - lastPunish < PUNISH_INTERVAL_MS) return;
+        lastPunish = now;
+        broadcast({ type: 'punish', id: me });
       } else if (msg.type === 'char') {
         user.characterId = msg.characterId;
         broadcast({ type: 'char', id: me, characterId: msg.characterId });
