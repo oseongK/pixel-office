@@ -27,6 +27,7 @@ npm run dev                       # mock 서버: http://localhost:8787
 ## 대시보드 연동
 
 iframe 삽입 방법, postMessage / WebSocket 메시지 스펙, 서버 보안 요구사항은 [PROTOCOL.md](PROTOCOL.md) 참고.
+다른 프로젝트로 이식하거나 AI 어시스턴트로 수정할 때는 [AI_INTEGRATION_GUIDE.md](AI_INTEGRATION_GUIDE.md) 를 먼저 읽힐 것.
 실시간 공유 서버는 대시보드 백엔드에서 구현해야 하며, `dev/mock-server.js` 는 개발·테스트용이다.
 
 ## 환경 변수
@@ -58,4 +59,5 @@ index.html            본체 (스프라이트, 게임 루프, 연동 로직)
 dev/mock-server.js    개발용 WebSocket + 정적 서버
 tests/                단위/E2E 테스트
 PROTOCOL.md           대시보드 연동 스펙
+AI_INTEGRATION_GUIDE.md  AI 어시스턴트용 이식/유지보수 가이드
 ```
