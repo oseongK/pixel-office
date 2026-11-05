@@ -249,3 +249,12 @@ test('출근 직후 집에서 회사 쪽(→)으로 걸으면 철퇴 없음', as
   await page.keyboard.up('ArrowRight');
   expect((await entity(page, 'me')).punished).toBe(false);
 });
+
+test('첫 로드 시 출근 상태인 내 캐릭터는 회사 구역 안에서 시작', async ({ page }) => {
+  await page.setViewportSize({ width: 1300, height: 400 });
+  for (let i = 0; i < 8; i++) {
+    await page.goto('/index.html?demo=0');
+    const me = await entity(page, 'me');
+    expect(me.zone, `시도 ${i + 1}: x=${me.x}`).toBe('office');
+  }
+});
