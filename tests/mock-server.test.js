@@ -146,3 +146,38 @@ test('hello 는 연결당 1회만 처리', async () => {
   assert.equal(server.users.has('once2'), false);
   a.ws.close();
 });
+
+test('punish 중계: 서버가 id 부여, 3초 빈도 제한', async () => {
+  const a = await client();
+  const b = await client();
+  a.ws.send(JSON.stringify({ type: 'hello', id: 'slave1' }));
+  b.ws.send(JSON.stringify({ type: 'hello', id: 'boss1' }));
+  await b.next((m) => m.type === 'snapshot' && m.users.some((u) => u.id === 'boss1'));
+  a.ws.send(JSON.stringify({ type: 'punish', id: 'boss1' }));
+  a.ws.send(JSON.stringify({ type: 'punish' }));
+  assert.deepEqual(await b.next((m) => m.type === 'punish'), { type: 'punish', id: 'slave1' });
+  const again = await Promise.race([
+    b.next((m) => m.type === 'punish'),
+    new Promise((r) => setTimeout(() => r(null), 100)),
+  ]);
+  assert.equal(again, null);
+  a.ws.close();
+  b.ws.close();
+});
+
+test('offline 사용자의 punish 는 중계하지 않음', async () => {
+  const a = await client();
+  const b = await client();
+  a.ws.send(JSON.stringify({ type: 'hello', id: 'park' }));
+  b.ws.send(JSON.stringify({ type: 'hello', id: 'watch2' }));
+  await b.next((m) => m.type === 'snapshot' && m.users.some((u) => u.id === 'watch2'));
+  server.users.get('park').status = 'offline';
+  a.ws.send(JSON.stringify({ type: 'punish' }));
+  const got = await Promise.race([
+    b.next((m) => m.type === 'punish'),
+    new Promise((r) => setTimeout(() => r(null), 100)),
+  ]);
+  assert.equal(got, null);
+  a.ws.close();
+  b.ws.close();
+});

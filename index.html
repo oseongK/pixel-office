@@ -712,6 +712,11 @@
               if (e && !e.isMe && typeof m.x === 'number' && Number.isFinite(m.x)) {
                 e.remoteNX = Math.max(0, Math.min(1, m.x));
                 e.facing = m.facing === -1 ? -1 : 1;
+                if (e.punish) e.punish.moved = true;
+                if (e.respawnWait) {
+                  e.x = e.remoteNX * W;
+                  respawn(e, performance.now());
+                }
               }
               break;
             case 'chat': {
@@ -721,6 +726,9 @@
             }
             case 'char':
               if (e && validChar(m.characterId) && !e.isMe) e.characterId = m.characterId;
+              break;
+            case 'punish':
+              if (e && !e.isMe && !e.punish) startPunish(e, false);
               break;
             case 'leave':
               if (e && !e.isMe) e.remoteNX = null;
@@ -760,7 +768,10 @@
         let lastChatAt = -Infinity;
 
         canvas.addEventListener('keydown', (ev) => {
-          if (chatting) return;
+          if (chatting || entities.get(ME)?.punish) {
+            if (['ArrowLeft', 'ArrowRight', 'ArrowUp', ' '].includes(ev.key)) ev.preventDefault();
+            return;
+          }
           if (['ArrowLeft', 'ArrowRight', 'ArrowUp', ' '].includes(ev.key)) {
             ev.preventDefault();
             keys.add(ev.key);
@@ -775,7 +786,7 @@
 
         function openChat() {
           const me = entities.get(ME);
-          if (!me) return;
+          if (!me || me.punish) return;
           chatting = true;
           keys.clear();
           input.value = '';
@@ -866,6 +877,55 @@
         }
 
         // ───────── 업데이트 ─────────
+        // 철퇴 연출 타임라인(ms): 낙하 → 충돌/흔들림 → 부활
+        const PUNISH_FALL = 700;
+        const PUNISH_SHAKE = 1000;
+        const PUNISH_END = 2200;
+        const PUNISH_RANGE = 20;
+        const PUNISH_TEXT = '일해라 노예야!';
+
+        function startPunish(e, local) {
+          e.punish = { start: performance.now(), moved: false };
+          e.respawnWait = null;
+          e.bubble = null;
+          e.walking = false;
+          e.target = null;
+          e.autopilot = false;
+          e.vy = 0;
+          e.y = 0;
+          if (local) {
+            keys.clear();
+            // 직전 위치를 먼저 보내 둔다. 이후 관전자가 받는 move 는 부활 위치뿐이다.
+            sendMove(e, performance.now());
+            send({ type: 'punish' });
+          }
+        }
+
+        // 부활 위치는 본인 화면이 정하고 move 로 전파된다.
+        // 관전자는 연출 중 move 를 못 받았으면 잠시 숨긴 채 move 를 기다린다.
+        const RESPAWN_WAIT = 1500;
+
+        function endPunish(e, now) {
+          const moved = e.punish.moved;
+          e.punish = null;
+          e.facing = -1;
+          if (e.isMe) {
+            keys.clear();
+            e.x = rand(...zoneFor(e.status));
+            respawn(e, now);
+          } else if (moved && e.remoteNX != null) {
+            e.x = e.remoteNX * W;
+            respawn(e, now);
+          } else {
+            e.respawnWait = now + RESPAWN_WAIT;
+          }
+        }
+
+        function respawn(e, now) {
+          e.respawnWait = null;
+          e.blinkUntil = now + 1000;
+        }
+
         const SPEED_ME = 70;
         const SPEED_COMMUTE = 55;
         const SPEED_WANDER = 18;
@@ -875,8 +935,24 @@
           let goal = null;
           let speed = SPEED_WANDER;
 
+          if (e.punish) {
+            if (now - e.punish.start >= PUNISH_END) endPunish(e, now);
+            return;
+          }
+          if (e.respawnWait) {
+            if (now < e.respawnWait) return;
+            e.remoteNX = null;
+            e.x = rand(...zoneFor(e.status));
+            respawn(e, now);
+          }
+
           if (e.isMe) {
             const dir = (keys.has('ArrowRight') ? 1 : 0) - (keys.has('ArrowLeft') ? 1 : 0);
+            // 출근 상태에서 직접 걸어서 집 쪽으로 다가가면 철퇴
+            if (dir < 0 && e.status === 'online' && e.x <= zones.home()[1] + PUNISH_RANGE) {
+              startPunish(e, true);
+              return;
+            }
             if ((keys.has('ArrowUp') || keys.has(' ')) && e.y === 0) e.vy = -150;
             if (dir) {
               e.autopilot = false;
@@ -935,11 +1011,16 @@
           if (!me || !connected) return;
           const nx = Math.round((me.x / W) * 10000) / 10000;
           if ((nx !== lastSentX || me.facing !== lastSentFacing) && now - lastSentAt >= 100) {
-            send({ type: 'move', x: nx, facing: me.facing });
-            lastSentX = nx;
-            lastSentFacing = me.facing;
-            lastSentAt = now;
+            sendMove(me, now);
           }
+        }
+
+        function sendMove(me, now) {
+          const nx = Math.round((me.x / W) * 10000) / 10000;
+          send({ type: 'move', x: nx, facing: me.facing });
+          lastSentX = nx;
+          lastSentFacing = me.facing;
+          lastSentAt = now;
         }
 
         // ───────── 그리기 ─────────
@@ -1025,7 +1106,7 @@
         }
 
         function drawGround() {
-          rect(0, GROUND, W, H - GROUND, '#c8743a');
+          rect(-4, GROUND, W + 8, H - GROUND + 4, '#c8743a');
           rect(0, GROUND, W, 3, '#5ed36a');
           rect(0, GROUND + 3, W, 1, '#2e9e44');
           ctx.fillStyle = '#a85a28';
@@ -1096,7 +1177,61 @@
           lines.forEach((l, i) => ctx.fillText(l, bx + 4, by + 3 + i * 7));
         }
 
+        function drawMace(cx, cy) {
+          rect(cx - 1, cy - 20, 2, 14, '#7a4b2a');
+          rect(cx - 2, cy - 21, 4, 2, '#5a3a22');
+          rect(cx - 1, cy - 8, 2, 2, '#3d4450');
+          rect(cx - 1, cy + 5, 2, 2, '#3d4450');
+          rect(cx - 7, cy - 1, 2, 2, '#3d4450');
+          rect(cx + 5, cy - 1, 2, 2, '#3d4450');
+          rect(cx - 5, cy - 5, 2, 2, '#3d4450');
+          rect(cx + 3, cy - 5, 2, 2, '#3d4450');
+          rect(cx - 5, cy + 3, 2, 2, '#3d4450');
+          rect(cx + 3, cy + 3, 2, 2, '#3d4450');
+          rect(cx - 4, cy - 3, 8, 7, '#8a8f98');
+          rect(cx - 3, cy - 5, 6, 11, '#8a8f98');
+          rect(cx - 5, cy - 2, 10, 5, '#8a8f98');
+          rect(cx - 2, cy - 3, 2, 2, '#d0d4da');
+        }
+
+        function drawPunish(e, now) {
+          const t = now - e.punish.start;
+          const x = Math.round(e.x - 8);
+          const headY = GROUND - 16;
+          if (t < PUNISH_FALL) {
+            ctx.drawImage(sprite(e.characterId, 0, e.facing), x, headY);
+            const k = t / PUNISH_FALL;
+            drawMace(Math.round(e.x), Math.round(-20 + (headY - 6 + 20) * k * k));
+            return;
+          }
+          ctx.drawImage(sprite(e.characterId, 0, e.facing), x - 3, GROUND - 6, 22, 6);
+          drawMace(Math.round(e.x), GROUND - 12);
+          for (let i = 0; i < 3; i++) {
+            const a = now / 150 + (i * Math.PI * 2) / 3;
+            rect(
+              Math.round(e.x + Math.cos(a) * 9),
+              Math.round(GROUND - 24 + Math.sin(a) * 3),
+              2,
+              2,
+              '#ffd23f',
+            );
+          }
+          setFont(8, 'bold');
+          const w = Math.ceil(ctx.measureText(PUNISH_TEXT).width) + 10;
+          const bx = Math.round(Math.max(1, Math.min(W - w - 1, e.x - w / 2)));
+          const by = GROUND - 50;
+          rect(bx, by, w, 12, '#0e1430');
+          rect(bx + 1, by + 1, w - 2, 10, '#e43b44');
+          ctx.fillStyle = '#ffffff';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(PUNISH_TEXT, bx + w / 2, by + 6.5);
+        }
+
         function drawEntity(e, now) {
+          if (e.punish) return drawPunish(e, now);
+          if (e.respawnWait) return;
+          if (e.blinkUntil > now && Math.floor(now / 100) % 2) return;
           const frame = e.walking && Math.floor(now / 160) % 2 ? 1 : 0;
           const x = Math.round(e.x - 8);
           const y = Math.round(GROUND - 16 + e.y);
@@ -1133,10 +1268,17 @@
         }
 
         function draw(now, dt) {
-          ctx.setTransform(px, 0, 0, px, 0, 0);
+          let shake = 0;
+          for (const e of entities.values()) {
+            const t = e.punish ? now - e.punish.start : -1;
+            if (t >= PUNISH_FALL && t < PUNISH_SHAKE) shake = 2;
+          }
+          const ox = shake ? Math.round(rand(-shake, shake)) : 0;
+          const oy = shake ? Math.round(rand(-shake, shake)) : 0;
+          ctx.setTransform(px, 0, 0, px, ox * px, oy * px);
           ctx.imageSmoothingEnabled = false;
           const { sky, night } = skyColors();
-          rect(0, 0, W, H, sky);
+          rect(-4, -4, W + 8, H + 8, sky);
           if (night)
             for (const [sx, sy] of stars) rect(Math.floor(sx * W), Math.floor(sy), 1, 1, '#fff');
           for (const c of clouds) {
@@ -1154,8 +1296,8 @@
 
           const list = [...entities.values()].sort((a, b) => a.isMe - b.isMe || a.x - b.x);
           list.forEach((e) => drawEntity(e, now));
-          drawNameTags(list);
-          list.forEach((e) => e.bubble && drawBubble(e));
+          drawNameTags(list.filter((e) => !e.respawnWait));
+          list.forEach((e) => e.bubble && !e.punish && !e.respawnWait && drawBubble(e));
 
           if (document.activeElement !== canvas && !chatting) {
             setFont(6, 'bold');
@@ -1236,6 +1378,7 @@
                   x: e.x,
                   zone: zoneOf(e.x),
                   bubble: e.bubble ? e.bubble.text : null,
+                  punished: !!(e.punish || e.respawnWait),
                 })),
               }),
             );

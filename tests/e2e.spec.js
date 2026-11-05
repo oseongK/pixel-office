@@ -162,3 +162,90 @@ test('창 크기 변경 시 회사에 있던 직원이 회사 구역 유지', as
   await expect.poll(async () => (await state(page)).width).toBeGreaterThan(420);
   await expect.poll(async () => (await entity(page, 'u3')).zone, { timeout: 10000 }).toBe('office');
 });
+
+async function holdUntil(page, key, pred, timeout = 15000) {
+  await page.locator('canvas.po-world').click();
+  await page.keyboard.down(key);
+  try {
+    await expect.poll(pred, { timeout, intervals: [50] }).toBe(true);
+  } finally {
+    await page.keyboard.up(key);
+  }
+}
+
+test('출근 상태로 집에 다가가면 철퇴 → 회사에서 부활', async ({ page }) => {
+  await page.goto('/index.html?demo=0');
+  await holdUntil(page, 'ArrowLeft', async () => (await entity(page, 'me')).punished);
+  const hitX = (await entity(page, 'me')).x;
+  expect((await entity(page, 'me')).zone).not.toBe('home');
+
+  // 연출 중 키 입력 무시
+  await page.keyboard.down('ArrowLeft');
+  await page.waitForTimeout(300);
+  await page.keyboard.up('ArrowLeft');
+  expect((await entity(page, 'me')).x).toBe(hitX);
+  await page.keyboard.press('Enter');
+  await expect(page.locator('.po-input')).toBeHidden();
+
+  await expect.poll(async () => (await entity(page, 'me')).punished, { timeout: 5000 }).toBe(false);
+  expect((await entity(page, 'me')).zone).toBe('office');
+});
+
+test('퇴근 상태면 집에 자유롭게 들어감', async ({ page }) => {
+  await page.goto('/index.html?demo=0');
+  await page.evaluate(() =>
+    window.postMessage(
+      { type: 'pixel-office:roster', users: [{ id: 'me', name: '나', status: 'offline' }] },
+      '*',
+    ),
+  );
+  await holdUntil(page, 'ArrowLeft', async () => (await entity(page, 'me')).zone === 'home');
+  await page.waitForTimeout(300);
+  expect((await entity(page, 'me')).punished).toBe(false);
+});
+
+test('철퇴 장면이 다른 사용자 화면에도 표시', async ({ browser }) => {
+  const ca = await browser.newContext();
+  const cb = await browser.newContext();
+  try {
+    const a = await ca.newPage();
+    const b = await cb.newPage();
+    await open(a, 'punish-a');
+    await open(b, 'punish-b');
+    await holdUntil(a, 'ArrowLeft', async () => (await entity(a, 'punish-a')).punished);
+    await expect
+      .poll(async () => (await entity(b, 'punish-a'))?.punished, { intervals: [50] })
+      .toBe(true);
+    await expect
+      .poll(async () => (await entity(b, 'punish-a')).punished, { timeout: 6000 })
+      .toBe(false);
+    const ax = (await entity(a, 'punish-a')).x / (await state(a)).width;
+    const bx = (await entity(b, 'punish-a')).x / (await state(b)).width;
+    expect((await entity(b, 'punish-a')).zone).toBe('office');
+    expect(Math.abs(ax - bx)).toBeLessThan(0.02);
+  } finally {
+    await ca.close();
+    await cb.close();
+  }
+});
+
+test('출근 직후 집에서 회사 쪽(→)으로 걸으면 철퇴 없음', async ({ page }) => {
+  await page.goto('/index.html?demo=0');
+  const roster = (status) =>
+    page.evaluate(
+      (st) =>
+        window.postMessage(
+          { type: 'pixel-office:roster', users: [{ id: 'me', name: '나', status: st }] },
+          '*',
+        ),
+      status,
+    );
+  await roster('offline');
+  await expect.poll(async () => (await entity(page, 'me')).zone, { timeout: 15000 }).toBe('home');
+  await roster('online');
+  await page.locator('canvas.po-world').click();
+  await page.keyboard.down('ArrowRight');
+  await page.waitForTimeout(1000);
+  await page.keyboard.up('ArrowRight');
+  expect((await entity(page, 'me')).punished).toBe(false);
+});
