@@ -212,10 +212,71 @@ export function PixelOfficeBanner({ me, users, wsUrl, src = '/pixel-office/index
 
 `punish` 직전에 `move` 를 보내는 이유: 관전자 화면의 출발 위치(`fromX`)를 본인과 맞추기 위함. 순서를 바꾸지 말 것.
 
-**효과 추가 방법** — `EFFECTS` 에 키 하나 추가: `{ duration, text, textAt:[시작,끝], anchor(e,t)→{x,top}, draw(e,t,now), overlay?(e,t,now), shake?:[시작,끝] }`.
-`draw` 는 `e.x` 가 아니라 `e.punish.fromX` / `e.punish.toNX * W` 기준으로 그린다 (`e.x` 는 연출 중 고정). 키는 `[a-z-]{1,16}` (서버 `EFFECT_RE`).
-헬퍼: `drawChar`, `drawBanner`, `drawPoof`, `drawStars`, `spriteTop`(스프라이트 맨 위 불투명 행), `lerp`/`ease`/`phase`.
-효과 이름 검사는 반드시 `isEffect()`(own-property)로 한다. `EFFECTS[name]` 존재 검사만 하면 `constructor` 같은 상속 키가 통과해 렌더 루프가 멈춘다.
+#### 효과 추가 방법
+
+**체크리스트** (하나라도 빠지면 테스트 실패 또는 문서 불일치)
+
+1. `index.html` 의 `EFFECTS` 객체에 키 추가 (키 형식 `[a-z-]{1,16}`, 서버 `EFFECT_RE` 와 동일)
+2. `tests/e2e.spec.js` 의 `'퇴근 방지 효과 5종…'` 테스트에서 `expect(effects).toEqual([...])` 배열에 키 추가 (순서 = `EFFECTS` 선언 순서). 효과 수가 바뀌면 테스트 이름과 `test.setTimeout` 도 조정 (효과 1개당 약 6초)
+3. 이 문서의 효과 표, `README.md` 기능 목록 갱신
+4. 서버(`dev/mock-server.js`, 운영 백엔드)는 **수정 불필요** — effect 는 형식만 검사해 중계한다
+5. `npm run lint && npm test`, 그리고 `window.__pixelOfficeForceEffect = '<키>'` 로 브라우저에서 눈으로 확인
+
+**인터페이스**
+
+| 필드                 | 필수 | 설명                                                                              |
+| -------------------- | ---- | --------------------------------------------------------------------------------- |
+| `duration`           | O    | 전체 길이(ms). 끝나면 `endPunish()` 가 캐릭터를 도착 위치 `toNX * W` 에 둔다      |
+| `text`               | O    | 배너 멘트. 캔버스 `fillText` 로만 그려짐                                          |
+| `textAt`             | O    | `[시작ms, 끝ms]` 배너 표시 구간                                                   |
+| `anchor(e, t)`       | O    | 배너 위치 `{ x, top }`. 배너는 `top` 보다 16px 위에 그려짐(화면 밖이면 자동 보정) |
+| `draw(e, t, now)`    | O    | 연출 중 **캐릭터 대신** 매 프레임 호출. 캐릭터를 그리지 않으면 안 보인다          |
+| `overlay(e, t, now)` | -    | 모든 캐릭터·이름표 위, 배너 아래에 그림 (화면 전체 효과용)                        |
+| `shake`              | -    | `[시작ms, 끝ms]` 화면 흔들림 구간                                                 |
+
+**좌표 규칙**
+
+- 논리 해상도 `W × 112`, 바닥 y = `GROUND`(96). 캐릭터 스프라이트는 16×16
+- `drawChar(e, cx, footY, frame = 0, facing = e.facing)`: `cx` 는 캐릭터 **가로 중심**, `footY` 는 **발 위치**(서 있으면 `GROUND`). `frame` 0/1 은 걷기 프레임
+- 출발 x = `e.punish.fromX`, 도착 x = `e.punish.toNX * W`. **`e.x` 는 연출 중 출발 위치로 고정**이므로 이동 연출은 직접 보간해서 그린다
+- 머리 위치는 `GROUND - 16 + spriteTop(e.characterId)` (슬라임처럼 위가 빈 몸체 대응)
+- 회사 문 중심 x = `doorX()`, 회사 건물 왼쪽 x = `W - 100`, 지붕 y = `GROUND - 76`
+
+**지켜야 할 규칙**
+
+- **결정적으로 그릴 것**: `draw`/`overlay`/`anchor` 는 `t`, `fromX`, `toNX`, `W` 만으로 위치를 계산한다. `Math.random()` 금지, `e` 수정 금지 — 접속자마다 다른 장면이 나온다. (`now` 는 깜빡임·흔들림 같은 장식에만)
+- **끝 장면은 도착 위치에서**: 마지막 프레임에 캐릭터가 `toNX * W` 근처에 있어야 부활 시 순간이동처럼 튀지 않는다 (사라졌다 나타나는 연출이면 무관)
+- `this` 로 다른 메서드(예: `pose`)를 부르려면 **메서드 문법**(`draw(e, t) {}`)을 쓸 것. 화살표 함수면 `this` 가 `EFFECTS` 가 아니다
+- 캔버스 상태 원복: `ctx.globalAlpha` 를 바꾸면 1로 되돌리고, `translate`/`rotate` 는 `ctx.save()`/`ctx.restore()` 로 감쌀 것
+- 길이는 3초 안팎 권장 (연출 중 키 입력이 막히고, 서버 빈도 제한도 3초)
+- 효과 이름 검사는 반드시 `isEffect()`(own-property)로 한다. `EFFECTS[name]` 존재 검사만 하면 `constructor` 같은 상속 키가 통과해 렌더 루프가 멈춘다
+
+**헬퍼**: `drawChar`, `drawBanner`, `drawPoof(cx, k)`(k 0→1 퍼짐), `drawStars(cx, cy, now)`, `spriteTop`, `rect(x, y, w, h, color)`, `lerp(a, b, k)`, `ease(k)`(in-out), `phase(t, a, b)`(t 를 a~b 구간 0~1 로).
+
+**예시** — 회의 알림창이 떨어져 캐릭터를 회사 쪽으로 밀어내는 효과 (실제로 넣어 동작 확인한 코드):
+
+```js
+          meeting: {
+            duration: 2400,
+            text: '5분 뒤 회의입니다',
+            textAt: [600, 2200],
+            pose(e, t) {
+              const k = ease(phase(t, 700, 2000));
+              return { x: lerp(e.punish.fromX, e.punish.toNX * W, k), boxY: lerp(-20, GROUND - 40, ease(phase(t, 0, 600))) };
+            },
+            anchor(e, t) {
+              return { x: this.pose(e, t).x, top: GROUND - 34 };
+            },
+            draw(e, t, now) {
+              const { x, boxY } = this.pose(e, t);
+              const pushing = t >= 700 && t < 2000;
+              drawChar(e, x, GROUND, pushing ? Math.floor(now / 100) % 2 : 0, 1);
+              rect(Math.round(x - 14), Math.round(boxY), 28, 14, '#0e1430');
+              rect(Math.round(x - 13), Math.round(boxY + 1), 26, 12, '#ffffff');
+              rect(Math.round(x - 13), Math.round(boxY + 1), 26, 3, '#3a7bd5');
+            },
+          },
+```
 
 **테스트 훅** — `window.__pixelOfficeForceEffect = 'claw'` 로 다음 효과를 강제할 수 있다 (E2E 용). `getState().effects` 는 효과 목록, `entities[].effect` 는 재생 중인 효과.
 
