@@ -212,10 +212,11 @@ test('철퇴 장면이 다른 사용자 화면에도 표시', async ({ browser }
     const b = await cb.newPage();
     await open(a, 'punish-a');
     await open(b, 'punish-b');
+    await a.evaluate(() => (window.__pixelOfficeForceEffect = 'claw'));
     await holdUntil(a, 'ArrowLeft', async () => (await entity(a, 'punish-a')).punished);
     await expect
-      .poll(async () => (await entity(b, 'punish-a'))?.punished, { intervals: [50] })
-      .toBe(true);
+      .poll(async () => (await entity(b, 'punish-a'))?.effect, { intervals: [50] })
+      .toBe('claw');
     await expect
       .poll(async () => (await entity(b, 'punish-a')).punished, { timeout: 6000 })
       .toBe(false);
@@ -256,5 +257,102 @@ test('첫 로드 시 출근 상태인 내 캐릭터는 회사 구역 안에서 �
     await page.goto('/index.html?demo=0');
     const me = await entity(page, 'me');
     expect(me.zone, `시도 ${i + 1}: x=${me.x}`).toBe('office');
+  }
+});
+
+test('퇴근 방지 효과 5종이 모두 에러 없이 재생되고 회사에서 부활', async ({ page }) => {
+  test.setTimeout(90000);
+  const errors = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  await page.setViewportSize({ width: 420, height: 300 });
+  await page.goto('/index.html?demo=0');
+  const effects = (await state(page)).effects;
+  expect(effects).toEqual(['mace', 'claw', 'lightning', 'issue', 'bungee']);
+  for (const fx of effects) {
+    await page.evaluate((f) => (window.__pixelOfficeForceEffect = f), fx);
+    await holdUntil(page, 'ArrowLeft', async () => (await entity(page, 'me')).punished);
+    expect((await entity(page, 'me')).effect).toBe(fx);
+    await expect
+      .poll(async () => (await entity(page, 'me')).punished, { timeout: 5000 })
+      .toBe(false);
+    expect((await entity(page, 'me')).zone, fx).toBe('office');
+  }
+  expect(errors).toEqual([]);
+});
+
+test('강제 지정이 없으면 같은 효과가 연속으로 나오지 않음', async ({ page }) => {
+  test.setTimeout(90000);
+  await page.setViewportSize({ width: 420, height: 300 });
+  await page.goto('/index.html?demo=0');
+  const seen = [];
+  for (let i = 0; i < 3; i++) {
+    await holdUntil(page, 'ArrowLeft', async () => (await entity(page, 'me')).punished);
+    seen.push((await entity(page, 'me')).effect);
+    await expect
+      .poll(async () => (await entity(page, 'me')).punished, { timeout: 5000 })
+      .toBe(false);
+  }
+  expect(seen[0]).not.toBe(seen[1]);
+  expect(seen[1]).not.toBe(seen[2]);
+});
+
+async function rawClient(page, id, msgs) {
+  await page.evaluate(
+    ({ url, id, msgs }) =>
+      new Promise((resolve) => {
+        const ws = new WebSocket(url);
+        ws.onopen = () => {
+          ws.send(JSON.stringify({ type: 'hello', id }));
+          msgs.forEach((m) => ws.send(JSON.stringify(m)));
+          setTimeout(resolve, 300);
+        };
+      }),
+    { url: WS, id, msgs },
+  );
+}
+
+test("악성 effect('constructor') 를 받아도 렌더 루프가 멈추지 않음", async ({ browser }) => {
+  const ca = await browser.newContext();
+  const cb = await browser.newContext();
+  try {
+    const a = await ca.newPage();
+    const errors = [];
+    a.on('pageerror', (e) => errors.push(e.message));
+    await open(a, 'victim-1');
+    const b = await cb.newPage();
+    await b.goto('/index.html?demo=0');
+    await rawClient(b, 'attacker-1', [{ type: 'punish', effect: 'constructor', to: 0.9 }]);
+    await expect.poll(async () => (await entity(a, 'attacker-1'))?.effect).toBe('mace');
+    await expect
+      .poll(async () => (await entity(a, 'attacker-1')).punished, { timeout: 5000 })
+      .toBe(false);
+    expect(errors).toEqual([]);
+  } finally {
+    await ca.close();
+    await cb.close();
+  }
+});
+
+test('연출 중 퇴근 처리된 원격 사용자는 끝난 뒤 집으로 감', async ({ browser, request }) => {
+  const ca = await browser.newContext();
+  const cb = await browser.newContext();
+  try {
+    const a = await ca.newPage();
+    const b = await cb.newPage();
+    await open(a, 'leaver-a');
+    await open(b, 'leaver-b');
+    await a.evaluate(() => (window.__pixelOfficeForceEffect = 'claw'));
+    await holdUntil(a, 'ArrowLeft', async () => (await entity(a, 'leaver-a')).punished);
+    await request.get('/admin/status?id=leaver-a&status=offline');
+    await expect.poll(async () => (await entity(b, 'leaver-a')).status).toBe('offline');
+    await expect
+      .poll(async () => (await entity(b, 'leaver-a')).zone, { timeout: 15000 })
+      .toBe('home');
+    await expect
+      .poll(async () => (await entity(a, 'leaver-a')).zone, { timeout: 15000 })
+      .toBe('home');
+  } finally {
+    await ca.close();
+    await cb.close();
   }
 });

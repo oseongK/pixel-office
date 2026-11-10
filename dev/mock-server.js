@@ -12,6 +12,7 @@ export const PUNISH_INTERVAL_MS = 3000;
 
 const ID_RE = /^[A-Za-z0-9_.-]{1,32}$/;
 const CHAR_RE = /^[a-z0-9-]{1,32}$/;
+const EFFECT_RE = /^[a-z-]{1,16}$/;
 // eslint-disable-next-line no-control-regex
 const CONTROL_RE = /[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2066-\u2069]/g;
 
@@ -47,8 +48,15 @@ export function parseClientMessage(raw) {
       const text = sanitizeText(msg.text);
       return text ? { type: 'chat', text } : null;
     }
-    case 'punish':
-      return { type: 'punish' };
+    case 'punish': {
+      // effect 는 형식만 검사한다. 모르는 효과는 클라이언트가 기본(mace)으로 재생한다.
+      const out = { type: 'punish' };
+      if (typeof msg.effect === 'string' && EFFECT_RE.test(msg.effect)) out.effect = msg.effect;
+      if (typeof msg.to === 'number' && Number.isFinite(msg.to)) {
+        out.to = Math.round(Math.max(0, Math.min(1, msg.to)) * 10000) / 10000;
+      }
+      return out;
+    }
     case 'char':
       return typeof msg.characterId === 'string' && CHAR_RE.test(msg.characterId)
         ? { type: 'char', characterId: msg.characterId }
@@ -157,7 +165,7 @@ export function createMockServer() {
         const now = Date.now();
         if (user.status !== 'online' || now - lastPunish < PUNISH_INTERVAL_MS) return;
         lastPunish = now;
-        broadcast({ type: 'punish', id: me });
+        broadcast({ ...msg, id: me });
       } else if (msg.type === 'char') {
         user.characterId = msg.characterId;
         broadcast({ type: 'char', id: me, characterId: msg.characterId });

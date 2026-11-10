@@ -181,3 +181,21 @@ test('offline 사용자의 punish 는 중계하지 않음', async () => {
   a.ws.close();
   b.ws.close();
 });
+
+test('punish: effect 형식 검사, to 0~1 보정', () => {
+  assert.deepEqual(
+    parseClientMessage(JSON.stringify({ type: 'punish', effect: 'claw', to: 0.81234 })),
+    {
+      type: 'punish',
+      effect: 'claw',
+      to: 0.8123,
+    },
+  );
+  assert.deepEqual(parseClientMessage(JSON.stringify({ type: 'punish', effect: '<b>', to: 9 })), {
+    type: 'punish',
+    to: 1,
+  });
+  assert.deepEqual(parseClientMessage(JSON.stringify({ type: 'punish', to: 'x' })), {
+    type: 'punish',
+  });
+});

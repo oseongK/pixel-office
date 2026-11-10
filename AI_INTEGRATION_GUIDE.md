@@ -8,7 +8,7 @@
 
 근태 대시보드 상단 배너용 **단일 HTML 파일**(`index.html`, 외부 의존성 0, 빌드 없음) 도트 게임.
 직원 캐릭터가 `online` → 회사, `offline` → 집에 서 있고, 내 캐릭터는 화살표로 이동·Enter로 말풍선.
-출근 중 집 쪽으로 걸어가면 철퇴 연출 후 회사에서 부활.
+출근 중 집 쪽으로 걸어가면 퇴근 방지 효과 5종(철퇴, 인형뽑기 집게, 번개, 이슈 경보, 고무줄) 중 하나가 무작위로 나오고 회사에서 부활.
 
 ## 2. 파일 역할 (이식 대상 구분)
 
@@ -144,7 +144,7 @@ export function PixelOfficeBanner({ me, users, wsUrl, src = '/pixel-office/index
 
 ### 3.6 실시간 공유 (선택)
 
-말풍선/위치/철퇴를 다른 사람에게 보이게 하려면 **호스트 백엔드에 WebSocket 엔드포인트**를 `PROTOCOL.md` 대로 구현한다.
+말풍선/위치/퇴근 방지 효과를 다른 사람에게 보이게 하려면 **호스트 백엔드에 WebSocket 엔드포인트**를 `PROTOCOL.md` 대로 구현한다.
 없으면 각자 화면에서만 동작한다 (근태 표시는 postMessage 만으로 충분).
 
 서버 구현 체크리스트 (`PROTOCOL.md` 4절 요약):
@@ -153,7 +153,7 @@ export function PixelOfficeBanner({ me, users, wsUrl, src = '/pixel-office/index
 - [ ] 브로드캐스트 메시지의 `id` 는 서버가 세션 기준으로 채움
 - [ ] 핸드셰이크 `Origin` 검증, 메시지 크기 제한(1KB)
 - [ ] `chat`: 제어문자 제거·trim·40자, 빈도 제한(500ms)
-- [ ] `punish`: 발신자가 `online` 일 때만, 빈도 제한(3초)
+- [ ] `punish`: 발신자가 `online` 일 때만, 빈도 제한(3초), `effect` 형식(`[a-z-]{1,16}`)·`to`(0~1) 검증
 - [ ] 접속 종료 시 `leave` 브로드캐스트
 - [ ] 근태 변경 시 `status` 푸시(선택)
 
@@ -163,45 +163,61 @@ export function PixelOfficeBanner({ me, users, wsUrl, src = '/pixel-office/index
 
 하나의 IIFE. 섹션 구분 주석(`// ───────── 이름 ─────────`) 순서대로:
 
-| 섹션            | 주요 식별자                                                    | 내용                                                          |
-| --------------- | -------------------------------------------------------------- | ------------------------------------------------------------- |
-| 스프라이트 정의 | `BODIES`, `HATS`, `CHARACTERS`, `sprite()`                     | 16×16 문자열 픽셀아트 → offscreen canvas 캐시(좌우 반전 포함) |
-| 입력 검증       | `cleanText`, `validId`, `validStatus`, `validChar`, `parseUrl` | 모든 외부 입력은 여기를 통과                                  |
-| 설정            | `ME`, `WS_URL`, `PARENT_ORIGIN`, `DEMO`                        | URL 파라미터 파싱                                             |
-| 화면/존         | `resize()`, `zones`, `zoneFor()`, `zoneOf()`                   | 논리 해상도 `W × 112`, 바닥 `GROUND=96`                       |
-| 엔티티          | `entities`(Map), `upsert()`, `setStatus()`, `say()`            | 직원 1명 = 엔티티 1개                                         |
-| 네트워크        | `connect()`, `handleServer()`, `send()`, `message` 리스너      | WebSocket(지수 백오프 재연결) + postMessage                   |
-| 입력            | canvas `keydown`, `openChat()`, `closeChat()`                  | **캔버스 포커스 시에만** 키 처리                              |
-| 캐릭터 선택     | `pick()`, `renderBar()`                                        | 하단 ◀ ▶ 바, localStorage 저장                                |
-| 업데이트        | `step()`, `startPunish()`, `endPunish()`, `syncMe()`           | 이동/배회/점프/철퇴 상태머신                                  |
-| 그리기          | `draw()`, `drawEntity()`, `drawPunish()`, `drawBubble()` 등    | 매 프레임 전체 다시 그림                                      |
-| 데모 모드       | `startDemo()`                                                  | `ws` 없고 `demo≠0` 일 때만                                    |
-| 시작            | `requestAnimationFrame(loop)`, `window.__pixelOffice`          | 테스트용 읽기 전용 `getState()`                               |
+| 섹션            | 주요 식별자                                                           | 내용                                                          |
+| --------------- | --------------------------------------------------------------------- | ------------------------------------------------------------- |
+| 스프라이트 정의 | `BODIES`, `HATS`, `CHARACTERS`, `sprite()`                            | 16×16 문자열 픽셀아트 → offscreen canvas 캐시(좌우 반전 포함) |
+| 입력 검증       | `cleanText`, `validId`, `validStatus`, `validChar`, `parseUrl`        | 모든 외부 입력은 여기를 통과                                  |
+| 설정            | `ME`, `WS_URL`, `PARENT_ORIGIN`, `DEMO`                               | URL 파라미터 파싱                                             |
+| 화면/존         | `resize()`, `zones`, `zoneFor()`, `zoneOf()`                          | 논리 해상도 `W × 112`, 바닥 `GROUND=96`                       |
+| 엔티티          | `entities`(Map), `upsert()`, `setStatus()`, `say()`                   | 직원 1명 = 엔티티 1개                                         |
+| 네트워크        | `connect()`, `handleServer()`, `send()`, `message` 리스너             | WebSocket(지수 백오프 재연결) + postMessage                   |
+| 입력            | canvas `keydown`, `openChat()`, `closeChat()`                         | **캔버스 포커스 시에만** 키 처리                              |
+| 캐릭터 선택     | `pick()`, `renderBar()`                                               | 하단 ◀ ▶ 바, localStorage 저장                                |
+| 업데이트        | `step()`, `startPunish()`, `endPunish()`, `pickEffect()`, `syncMe()`  | 이동/배회/점프/퇴근 방지 상태머신                             |
+| 그리기          | `draw()`, `drawEntity()`, `drawBubble()`, `EFFECTS`/`drawBanner()` 등 | 매 프레임 전체 다시 그림                                      |
+| 데모 모드       | `startDemo()`                                                         | `ws` 없고 `demo≠0` 일 때만                                    |
+| 시작            | `requestAnimationFrame(loop)`, `window.__pixelOffice`                 | 테스트용 읽기 전용 `getState()`                               |
 
 ### 엔티티 필드
 
-`id, name, status, characterId, x(논리 px), y(점프 오프셋, ≤0), vy, facing(1|-1), target(자동 이동 목표 x), remoteNX(원격 위치 0~1), autopilot(내 캐릭터 자동 출퇴근 중), walking, wanderAt, bubble{text,until}, isMe, fromRoster, punish{start,moved}, respawnWait, blinkUntil`
+`id, name, status, characterId, x(논리 px), y(점프 오프셋, ≤0), vy, facing(1|-1), target(자동 이동 목표 x), remoteNX(원격 위치 0~1), autopilot(내 캐릭터 자동 출퇴근 중), walking, wanderAt, bubble{text,until}, isMe, fromRoster, punish{start,effect,fromX,toNX,moved}, blinkUntil`
 
 ### 이동 우선순위 (`step()`)
 
-1. `punish` 진행 중 → 정지, `PUNISH_END` 경과 시 `endPunish()`
-2. `respawnWait` (관전자 화면에서 부활 위치 대기) → 숨김
-3. 내 캐릭터: 키 입력 > `autopilot` 목표
-4. 원격 사용자: `remoteNX` 따라감
-5. 그 외: 자기 존 안에서 랜덤 배회
+1. `punish` 진행 중 → 정지, 효과의 `duration` 경과 시 `endPunish()`
+2. 내 캐릭터: 키 입력 > `autopilot` 목표
+3. 원격 사용자: `remoteNX` 따라감
+4. 그 외: 자기 존 안에서 랜덤 배회
 
-### 철퇴 연출 흐름
+### 퇴근 방지 효과 (`EFFECTS`)
+
+출근 상태에서 ← 로 집 존 끝 + `PUNISH_RANGE` 안에 들어가면 5종 중 하나가 무작위 재생된다 (직전 효과 제외).
+
+| 키          | 멘트              | 연출                                              | 길이   |
+| ----------- | ----------------- | ------------------------------------------------- | ------ |
+| `mace`      | 일해라 노예야!    | 철퇴 낙하 → 납작 + 별                             | 2200ms |
+| `claw`      | 아직 집에 못가요~ | 인형뽑기 집게가 집어서 회사 위로 옮겨 떨어뜨림    | 3000ms |
+| `lightning` | 야근 확정!        | 화면 어두워짐 + 번개 → 까맣게 그을림 → 펑, 회사로 | 2400ms |
+| `issue`     | 이슈 터졌다!!!    | 빨간 경보 + 사이렌 → 놀라 점프 → 회사로 전력질주  | 2600ms |
+| `bungee`    | 어딜 도망가~      | 회사 문에서 고무줄 → 빙글빙글 날아가 착지         | 2600ms |
 
 ```
-[본인] ← 키 + status=online + x ≤ 집 존 끝+PUNISH_RANGE
-   → startPunish(local): move(현재 위치) 즉시 전송 → punish 전송
-   → 0~700ms 낙하, 700~1000ms 화면 흔들림, ~2200ms 배너
-   → endPunish: zoneFor(status) 에서 부활 → 다음 프레임 syncMe 가 move 전송
-[관전자] punish 수신 → 같은 연출 → 연출 중 move 받았으면 그 위치에서 부활,
-         못 받았으면 최대 1500ms 숨긴 채 move 대기 (없으면 자기 존 랜덤)
+[본인] startPunish(local): pickEffect() + 도착 위치 to(회사 존 랜덤, 0~1) 결정
+       → move(현재 위치) 즉시 전송 → punish{effect, to} 전송
+       → effect.draw 가 매 프레임 캐릭터 대신 그림, effect.overlay 는 화면 전체 위에
+       → duration 경과 → endPunish: to 위치에서 부활 (연출 중 퇴근 처리됐으면 집 존)
+[관전자] punish{id, effect, to} 수신 → 같은 효과/같은 도착 위치로 재생 → to 에서 부활
+         (모르는 effect 는 mace, to 가 없으면 회사 존 랜덤 → 이후 move 로 보정)
 ```
 
-`punish` 직전에 `move` 를 보내는 이유: WebSocket 은 순서를 보장하므로, 관전자가 punish 이후 받는 move 는 부활 위치뿐이게 된다. 이 순서를 바꾸지 말 것.
+`punish` 직전에 `move` 를 보내는 이유: 관전자 화면의 출발 위치(`fromX`)를 본인과 맞추기 위함. 순서를 바꾸지 말 것.
+
+**효과 추가 방법** — `EFFECTS` 에 키 하나 추가: `{ duration, text, textAt:[시작,끝], anchor(e,t)→{x,top}, draw(e,t,now), overlay?(e,t,now), shake?:[시작,끝] }`.
+`draw` 는 `e.x` 가 아니라 `e.punish.fromX` / `e.punish.toNX * W` 기준으로 그린다 (`e.x` 는 연출 중 고정). 키는 `[a-z-]{1,16}` (서버 `EFFECT_RE`).
+헬퍼: `drawChar`, `drawBanner`, `drawPoof`, `drawStars`, `spriteTop`(스프라이트 맨 위 불투명 행), `lerp`/`ease`/`phase`.
+효과 이름 검사는 반드시 `isEffect()`(own-property)로 한다. `EFFECTS[name]` 존재 검사만 하면 `constructor` 같은 상속 키가 통과해 렌더 루프가 멈춘다.
+
+**테스트 훅** — `window.__pixelOfficeForceEffect = 'claw'` 로 다음 효과를 강제할 수 있다 (E2E 용). `getState().effects` 는 효과 목록, `entities[].effect` 는 재생 중인 효과.
 
 ## 5. 반드시 지킬 불변식
 
@@ -227,7 +243,7 @@ export function PixelOfficeBanner({ me, users, wsUrl, src = '/pixel-office/index
 `.` 은 투명, 오른쪽을 바라보게 그린다(왼쪽은 자동 반전). `alt` 는 걷기 2번째 프레임에서 교체할 행.
 행 길이가 16이 아니면 깨지므로 추가 후 길이를 검증할 것.
 
-**철퇴 조정** — 상수 `PUNISH_TEXT`(멘트), `PUNISH_RANGE`(집 존 끝에서 발동 거리 px), `PUNISH_FALL`/`PUNISH_SHAKE`/`PUNISH_END`(ms).
+**퇴근 방지 효과 조정** — 멘트/타이밍은 `EFFECTS[키].text`, `textAt`, `duration`, `shake`. 발동 거리는 `PUNISH_RANGE`(집 존 끝에서 px).
 
 **속도/물리** — `SPEED_ME`, `SPEED_COMMUTE`, `SPEED_WANDER`(px/s), `GRAVITY`.
 
