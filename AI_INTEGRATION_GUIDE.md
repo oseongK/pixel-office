@@ -253,27 +253,28 @@ export function PixelOfficeBanner({ me, users, wsUrl, src = '/pixel-office/index
 
 **헬퍼**: `drawChar`, `drawBanner`, `drawPoof(cx, k)`(k 0→1 퍼짐), `drawStars(cx, cy, now)`, `spriteTop`, `rect(x, y, w, h, color)`, `lerp(a, b, k)`, `ease(k)`(in-out), `phase(t, a, b)`(t 를 a~b 구간 0~1 로).
 
-**예시** — 회의 알림창이 떨어져 캐릭터를 회사 쪽으로 밀어내는 효과 (실제로 넣어 동작 확인한 코드):
+**예시** — 실제 `index.html` 의 `mace`(철퇴) 효과. 가장 단순한 형태(이동 없음)다.
+이동하는 효과는 `pose(e, t)` 로 위치를 한 번 계산해 `draw`·`anchor` 가 같이 쓰는 `claw`, `issue`, `bungee` 를 참고할 것.
 
 ```js
-          meeting: {
-            duration: 2400,
-            text: '5분 뒤 회의입니다',
-            textAt: [600, 2200],
-            pose(e, t) {
-              const k = ease(phase(t, 700, 2000));
-              return { x: lerp(e.punish.fromX, e.punish.toNX * W, k), boxY: lerp(-20, GROUND - 40, ease(phase(t, 0, 600))) };
-            },
-            anchor(e, t) {
-              return { x: this.pose(e, t).x, top: GROUND - 34 };
-            },
+          mace: {
+            duration: 2200,
+            shake: [700, 1000],
+            text: '일해라 노예야!',
+            textAt: [700, 2200],
+            anchor: (e) => ({ x: e.punish.fromX, top: GROUND - 34 }),
             draw(e, t, now) {
-              const { x, boxY } = this.pose(e, t);
-              const pushing = t >= 700 && t < 2000;
-              drawChar(e, x, GROUND, pushing ? Math.floor(now / 100) % 2 : 0, 1);
-              rect(Math.round(x - 14), Math.round(boxY), 28, 14, '#0e1430');
-              rect(Math.round(x - 13), Math.round(boxY + 1), 26, 12, '#ffffff');
-              rect(Math.round(x - 13), Math.round(boxY + 1), 26, 3, '#3a7bd5');
+              const x = e.punish.fromX;
+              if (t < 700) {
+                drawChar(e, x, GROUND);
+                const k = t / 700;
+                drawMace(Math.round(x), Math.round(-20 + (GROUND - 2) * k * k));
+                return;
+              }
+              const img = sprite(e.characterId, 0, e.facing);
+              ctx.drawImage(img, Math.round(x - 11), GROUND - 6, 22, 6);
+              drawMace(Math.round(x), GROUND - 12);
+              drawStars(x, GROUND - 24, now);
             },
           },
 ```
